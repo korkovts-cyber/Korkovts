@@ -47,13 +47,23 @@ async def backtest(u,c):
         await u.message.reply_text(f"🧪 {sym} {tf}\nTrades: {t}\nWins: {w}\nLosses: {l}\nWin rate: {r:.1f}%")
     except Exception as e: await u.message.reply_text(f"Ошибка: {e}")
 
-async def main():
-    if not TELEGRAM_BOT_TOKEN: raise RuntimeError("Add TELEGRAM_BOT_TOKEN to .env")
-    init()
-    app=Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start",start)); app.add_handler(CommandHandler("help",start))
-    app.add_handler(CommandHandler("signal",signal)); app.add_handler(CommandHandler("scan",scan_cmd))
-    app.add_handler(CommandHandler("status",status)); app.add_handler(CommandHandler("backtest",backtest))
-    await app.run_polling()
+def main():
+    if not TELEGRAM_BOT_TOKEN:
+        raise RuntimeError("Add TELEGRAM_BOT_TOKEN to .env")
 
-if __name__=="__main__": asyncio.run(main())
+    init()
+
+    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", start))
+    app.add_handler(CommandHandler("signal", signal))
+    app.add_handler(CommandHandler("scan", scan_cmd))
+    app.add_handler(CommandHandler("status", status))
+    app.add_handler(CommandHandler("backtest", backtest))
+
+    app.run_polling()
+
+
+if __name__ == "__main__":
+    main()
