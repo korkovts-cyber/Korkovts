@@ -3,10 +3,10 @@
 Telegram-only crypto signal bot. It reads public Binance Futures market data and does not place trades.
 
 Features:
-- market scan for USDT perpetuals
-- 5m/15m/1h/4h/1d data
-- EMA, RSI, MACD, ATR, volume
-- higher-timeframe confirmation
+- full liquid Binance USDⓈ-M perpetual market scan (not a fixed coin list)
+- 15m/1h/4h confirmation and BTC market-regime filter
+- EMA, RSI, MACD, ATR, ADX, volume z-score and structure breakout
+- funding-rate crowding penalty and open-interest snapshot
 - LONG/SHORT scoring
 - entry/SL/TP1/TP2/TP3
 - risk-based position sizing
@@ -22,8 +22,14 @@ Features:
 Commands:
 - /start
 - /scan
-- /signal ARB
+- /signal BTC
+- /prices
+- /movers
 - /status
-- /backtest ARB 1h
+- /backtest BTC 1h
 
-This is a research/educational system, not a guarantee of profit.
+`MAX_SYMBOLS_TO_SCAN=0` scans every liquid USDT perpetual. Use
+`MIN_24H_QUOTE_VOLUME` and `SCAN_CONCURRENCY` to control quality and API load.
+
+This is a research/educational system, not a guarantee of profit. Validate the
+strategy out of sample and paper-trade it before risking money.
