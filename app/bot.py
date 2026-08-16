@@ -1,311 +1,314 @@
-import asyncio,logging
-from telegram import Update,InlineKeyboardButton,InlineKeyboardMarkup
-from telegram.constants import ParseMode
-from telegram.ext import Application,CommandHandler,CallbackQueryHandler
-from .config import (TELEGRAM_BOT_TOKEN,MIN_SIGNAL_SCORE,TOP_COINS,
-    AUTO_SCAN_INTERVAL_MIN,MAX_AUTO_SIGNALS,SIGNAL_COOLDOWN_HOURS,ROUND_TRIP_COST_PCT)
-from .db import (init,save,recent,subscribe,subscribers,was_sent_recently,quality_stats,
-    calibration_penalty,set_risk_profile,get_risk_profile,daily_risk_guard,
-    portfolio_allowed,register_paper_trade,paper_stats,reset_paper_account,paper_trade_chats)
-from .market import get_klines,get_prices,get_tickers,get_derivatives_snapshot
-from .strategy import analyze,fmt
-from .scanner import scan,market_state
-from .tracker import update_outcomes
-from .backtest import run as bt
-from .risk import conservative_plan
+import asyncio
+import logging
+from datetime import datetime, timezone
 
-logging.basicConfig(level=logging.INFO)
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.constants import ParseMode
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler
+
+from .config import AUTO_SCAN_INTERVAL_MIN, MIN_SIGNAL_SCORE, SIGNAL_COOLDOWN_HOURS, TELEGRAM_BOT_TOKEN, TOP_COINS
+from .db import init, recent, save, subscribe, subscribers, was_sent_recently
+from .market import get_derivatives_snapshot, get_klines, get_prices, get_tickers
+from .scanner import market_state, scan, scan_short
+from .strategy import analyze, fmt
+from .tracker import update_outcomes
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+log = logging.getLogger(__name__)
+_scan_lock = asyncio.Lock()
+
 
 def menu(analyze_symbol=None):
-    rows=[]
+    rows = [
+        [InlineKeyboardButton("⚡ ОСНОВНЫЕ СИГНАЛЫ", callback_data="scan")],
+        [InlineKeyboardButton("⏱ КОРОТКИЕ СДЕЛКИ", callback_data="short_scan")],
+    ]
     if analyze_symbol:
-        coin=analyze_symbol.replace("USDT","")
-        rows.append([InlineKeyboardButton(f"🔎 Подробный анализ {coin}",callback_data=f"analyze:{analyze_symbol}")])
+        coin = analyze_symbol.removesuffix("USDT")
+        rows.append([InlineKeyboardButton(f"🔎 ПОВТОРИТЬ АНАЛИЗ {coin}", callback_data=f"analyze:{analyze_symbol}")])
     rows += [
-        [InlineKeyboardButton("🔥 СИЛЬНЫЕ СИГНАЛЫ",callback_data="scan")],
-        [InlineKeyboardButton(f"{coin}/USDT",callback_data=f"price:{coin}USDT") for coin in TOP_COINS[:3]],
-        [InlineKeyboardButton(f"{coin}/USDT",callback_data=f"price:{coin}USDT") for coin in TOP_COINS[3:6]],
-        [InlineKeyboardButton("📊 РЫНОК",callback_data="prices"),InlineKeyboardButton("🚀 ЛИДЕРЫ",callback_data="movers")],
-        [InlineKeyboardButton("📜 ИСТОРИЯ",callback_data="status"),InlineKeyboardButton("📈 СТАТИСТИКА",callback_data="stats")],
-        [InlineKeyboardButton("🧪 ТЕСТ BTC",callback_data="backtest_btc")],
-        [InlineKeyboardButton("🔔 ВКЛ. АВТО",callback_data="alerts_on"),InlineKeyboardButton("🔕 ВЫКЛ. АВТО",callback_data="alerts_off")],
-        [InlineKeyboardButton("🛡 МОЙ РИСК",callback_data="risk_info")],
-        [InlineKeyboardButton("🧾 PAPER-ПОРТФЕЛЬ",callback_data="paper")],
-        [InlineKeyboardButton("🧹 ОЧИСТИТЬ ЧАТ",callback_data="clear_chat")]
+        [InlineKeyboardButton(f"{coin}/USDT", callback_data=f"price:{coin}USDT") for coin in TOP_COINS[:3]],
+        [InlineKeyboardButton(f"{coin}/USDT", callback_data=f"price:{coin}USDT") for coin in TOP_COINS[3:6]],
+        [InlineKeyboardButton("💹 КУРСЫ", callback_data="prices"), InlineKeyboardButton("🚀 ДВИЖЕНИЯ", callback_data="movers")],
+        [InlineKeyboardButton("🔔 АВТО: ВКЛ", callback_data="alerts_on"), InlineKeyboardButton("🔕 АВТО: ВЫКЛ", callback_data="alerts_off")],
+        [InlineKeyboardButton("🗂 ИСТОРИЯ", callback_data="status"), InlineKeyboardButton("🧹 ОЧИСТИТЬ", callback_data="clear_chat")],
     ]
     return InlineKeyboardMarkup(rows)
 
-async def start(u,c):
-    subscribe(u.effective_chat.id,True)
-    await u.message.reply_text("🤖 <b>Universal Crypto Signal Bot</b>\n\n"
-        "/scan — сильные сигналы всего Binance Futures\n/signal BTC — анализ монеты\n"
-        "/prices — цены топ-монет\n/movers — рост и падение\n/status — история\n/stats — статистика\n"
-        "/alerts_on — включить автосигналы\n/alerts_off — выключить\n"
-        "/risk 1000 0.5 — капитал и риск 0,5%\n"
-        "/paper — виртуальный портфель\n"
-        "/backtest BTC 1h — тест",parse_mode=ParseMode.HTML,reply_markup=menu())
 
-def guarded_text():
-    state=daily_risk_guard()
-    return ("🛡 <b>ЗАЩИТНАЯ ПАУЗА</b>\n\nНовые сигналы временно остановлены: "
-        f"{state['reason']}. Возобновление произойдёт автоматически после выхода результатов из окна 24 часов."
-        "\n\nНе пытайся отыгрывать убыток.")
+async def start(update, context):
+    subscribe(update.effective_chat.id, True)
+    text = (
+        "⚡ <b>KORKOVTS SIGNAL AI</b>\n━━━━━━━━━━━━━━━━━━\n"
+        "📡 Весь рынок Binance Futures USDT-M\n"
+        "🧠 Многофакторный анализ 15m · 1H · 4H\n"
+        f"⏱ Автоскан каждые {AUTO_SCAN_INTERVAL_MIN} минут\n\n"
+        "Бот показывает <b>все найденные сильные сигналы</b>, а лучший ставит первым. "
+        "Если условий для входа нет — бот честно сообщает об этом.\n\n"
+        "⚠️ Это исследовательский инструмент, а не гарантия прибыли. "
+        "Не увеличивай ставку после убытка и не торгуй заёмными деньгами."
+    )
+    await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=menu())
 
-def signal_text(s,chat_id,priority=False):
-    text=fmt(s,priority); profile=get_risk_profile(chat_id)
-    if not profile:
-        return text+"\n\n🛡 Для расчёта безопасного размера: <code>/risk 1000 0.5</code>"
-    plan=conservative_plan(s,profile["balance"],profile["risk_pct"],ROUND_TRIP_COST_PCT)
-    return (text+f"\n\n🛡 <b>КОНСЕРВАТИВНЫЙ РИСК-ПЛАН</b>"
-        f"\nКапитал: <b>{profile['balance']:.2f} USDT</b>"
-        f"\nБазовый риск: <b>{profile['risk_pct']:.2f}%</b>"
-        f"\nРиск с поправкой на волатильность: <b>{plan['effective_risk_pct']:.2f}% / {plan['risk_budget']:.2f} USDT</b>"
-        f"\nМаксимальный размер: <b>{plan['qty']:.6g} {s.symbol.removesuffix('USDT')}</b>"
-        f"\nОбъём позиции: <b>{plan['notional']:.2f} USDT</b>"
-        f"\nФактический риск до стопа: <b>≈ {plan['actual_risk']:.2f} USDT</b>"
-        f"\nВ расчёте заложено на комиссии/проскальзывание: <b>{ROUND_TRIP_COST_PCT:.2f}%</b>"
-        "\nБез усреднения и переноса стоп-лосса.")
 
-async def risk(u,c):
-    msg=u.effective_message
-    if not c.args:
-        p=get_risk_profile(u.effective_chat.id)
-        if p:
-            return await msg.reply_text(f"🛡 Капитал: {p['balance']:.2f} USDT\nРиск: {p['risk_pct']:.2f}%\n\nИзменить: /risk 1000 0.5",reply_markup=menu())
-        return await msg.reply_text("🛡 Укажи капитал и риск на сделку:\n/risk 1000 0.5\n\nМаксимально разрешено 1%.",reply_markup=menu())
+async def _analyze_symbol(symbol):
+    from .news import for_symbol, get_news_sentiment
+    lower, hourly, higher, derivatives, state, news = await asyncio.gather(
+        get_klines(symbol, "15m", 300), get_klines(symbol, "1h", 400),
+        get_klines(symbol, "4h", 400), get_derivatives_snapshot(symbol),
+        market_state(), get_news_sentiment(),
+    )
+    threshold = min(94, MIN_SIGNAL_SCORE + state["score_adjustment"])
+    return analyze(symbol, "1H", hourly, higher, threshold, lower, state["bias"], derivatives, for_symbol(news, symbol))
+
+
+async def signal(update, context):
+    symbol = (context.args[0] if context.args else "BTCUSDT").upper().replace("/", "")
+    if not symbol.endswith("USDT"):
+        symbol += "USDT"
+    msg = update.effective_message
+    await msg.reply_text(f"🧠 Анализирую <b>{symbol}</b>…", parse_mode=ParseMode.HTML)
     try:
-        balance=float(c.args[0].replace(",",".")); risk_pct=float(c.args[1].replace(",",".")) if len(c.args)>1 else .5
-        set_risk_profile(u.effective_chat.id,balance,risk_pct)
-        await msg.reply_text(f"✅ Риск-профиль сохранён.\nКапитал: {balance:.2f} USDT\nРиск: {risk_pct:.2f}%",reply_markup=menu())
-    except (ValueError,IndexError) as e:
-        await msg.reply_text(f"Не удалось сохранить: {e}\nПример: /risk 1000 0.5",reply_markup=menu())
+        result = await _analyze_symbol(symbol)
+        if result:
+            if not was_sent_recently(result.symbol, result.side, SIGNAL_COOLDOWN_HOURS, result.timeframe):
+                save(result, update.effective_chat.id)
+            await msg.reply_text(fmt(result, True), parse_mode=ParseMode.HTML, reply_markup=menu(symbol))
+        else:
+            await msg.reply_text(
+                f"⚪ <b>{symbol}</b>: сейчас нет достаточно сильного подтверждённого входа.\n"
+                "Лучшее действие — пропустить слабую сделку.",
+                parse_mode=ParseMode.HTML, reply_markup=menu(symbol))
+    except Exception:
+        log.exception("symbol analysis failed for %s", symbol)
+        await msg.reply_text("⚠️ Не удалось получить все рыночные данные. Попробуй ещё раз через минуту.", reply_markup=menu())
 
-async def paper(u,c):
-    account,summary,opened=paper_stats(u.effective_chat.id)
-    initial,balance,peak,max_dd=account
-    trades,wins,total_pnl,gains,losses=summary
-    trades=trades or 0; wins=wins or 0; total_pnl=total_pnl or 0; gains=gains or 0; losses=losses or 0
-    pf=gains/losses if losses else (999 if gains else 0)
-    text=("🧾 <b>PAPER-ПОРТФЕЛЬ</b>\n\n"
-        f"Стартовый баланс: <b>{initial:.2f} USDT</b>\nТекущий баланс: <b>{balance:.2f} USDT</b>\n"
-        f"Результат: <b>{total_pnl:+.2f} USDT ({(balance/initial-1)*100:+.2f}%)</b>\n"
-        f"Закрытых сделок: <b>{trades}</b> | Открытых/ожидающих: <b>{opened}</b>\n"
-        f"Доля прибыльных: <b>{wins/trades*100 if trades else 0:.1f}%</b>\nProfit Factor: <b>{pf:.2f}</b>\n"
-        f"Максимальная просадка: <b>{max_dd:.2f} USDT</b>\n\n"
-        "Сбросить симуляцию: <code>/paper_reset 1000</code>")
-    await u.effective_message.reply_text(text,parse_mode=ParseMode.HTML,reply_markup=menu())
 
-async def paper_reset(u,c):
+async def _send_results(bot, chat_id, results, automatic=False, short=False):
+    label = "КОРОТКИЕ СДЕЛКИ" if short else ("АВТОСКАН" if automatic else "СКАН РЫНКА")
+    stamp = datetime.now(timezone.utc).strftime("%H:%M UTC")
+    if not results:
+        return await bot.send_message(
+            chat_id,
+            f"📡 <b>{label} ЗАВЕРШЁН</b> · {stamp}\n━━━━━━━━━━━━━━━━━━\n"
+            "⚪ Сильных подтверждённых сигналов сейчас нет.\n"
+            "Бот продолжит наблюдение — отсутствие сделки тоже является результатом анализа.",
+            parse_mode=ParseMode.HTML, reply_markup=menu())
+    await bot.send_message(
+        chat_id,
+        f"📡 <b>{label} ЗАВЕРШЁН</b> · {stamp}\n━━━━━━━━━━━━━━━━━━\n"
+        f"Найдено сильных сигналов: <b>{len(results)}</b>\n"
+        "Они отсортированы по силе; первый — приоритетный.",
+        parse_mode=ParseMode.HTML)
+    for index, result in enumerate(results):
+        await bot.send_message(
+            chat_id, fmt(result, index == 0), parse_mode=ParseMode.HTML,
+            reply_markup=menu(result.symbol) if index == len(results) - 1 else None)
+
+
+async def scan_cmd(update, context):
+    msg = update.effective_message
+    if _scan_lock.locked():
+        return await msg.reply_text("⏳ Сканирование уже выполняется. Дождись результата.", reply_markup=menu())
+    await msg.reply_text("🔎 Проверяю ликвидные бессрочные пары Binance Futures…")
     try:
-        balance=float(c.args[0].replace(",",".")) if c.args else 1000
-        reset_paper_account(u.effective_chat.id,balance)
-        await u.effective_message.reply_text(f"✅ Paper-портфель сброшен. Баланс: {balance:.2f} USDT",reply_markup=menu())
-    except ValueError as e: await u.effective_message.reply_text(f"Ошибка: {e}",reply_markup=menu())
+        async with _scan_lock:
+            results = await scan()
+        for result in results:
+            if not was_sent_recently(result.symbol, result.side, SIGNAL_COOLDOWN_HOURS, result.timeframe):
+                save(result, update.effective_chat.id)
+        await _send_results(context.bot, update.effective_chat.id, results)
+    except Exception:
+        log.exception("manual market scan failed")
+        await msg.reply_text("⚠️ Скан временно не выполнен: один из источников рынка недоступен.", reply_markup=menu())
 
-async def signal(u,c):
-    msg=u.effective_message
-    if daily_risk_guard()["locked"]:
-        return await msg.reply_text(guarded_text(),parse_mode=ParseMode.HTML,reply_markup=menu())
-    sym=(c.args[0] if c.args else "BTCUSDT").upper()
-    if not sym.endswith("USDT"): sym+="USDT"
+
+async def short_scan_cmd(update, context):
+    msg = update.effective_message
+    if _scan_lock.locked():
+        return await msg.reply_text("⏳ Другой скан уже выполняется. Дождись результата.", reply_markup=menu())
+    await msg.reply_text("⏱ Ищу краткосрочные входы: 5m → 15m → 1H…")
     try:
-        from .news import get_news_sentiment,for_symbol
-        lower,a,b,d,state,news=await asyncio.gather(get_klines(sym,"15m",300),get_klines(sym,"1h",400),
-            get_klines(sym,"4h",400),get_derivatives_snapshot(sym),market_state(),get_news_sentiment())
-        threshold=min(92,MIN_SIGNAL_SCORE+state["score_adjustment"])
-        first=analyze(sym,"1H",a,b,threshold,lower,state["bias"],d,for_symbol(news,sym))
-        penalty=calibration_penalty(sym,first.side) if first else 0
-        s=analyze(sym,"1H",a,b,min(95,threshold+penalty),lower,state["bias"],d,for_symbol(news,sym))
-        if s:
-            allowed,reason=portfolio_allowed(u.effective_chat.id,s)
-            if not allowed: return await msg.reply_text(f"🛡 Сигнал найден, но paper-портфель его заблокировал: {reason}.",reply_markup=menu())
-            signal_id=save(s); register_paper_trade(u.effective_chat.id,signal_id,s)
-            await msg.reply_text(signal_text(s,u.effective_chat.id,True),parse_mode=ParseMode.HTML,reply_markup=menu())
-        else: await msg.reply_text(f"⚪ {sym}: сильного сигнала нет.",reply_markup=menu())
-    except Exception as e: await msg.reply_text(f"Ошибка: {e}",reply_markup=menu())
+        async with _scan_lock:
+            results = await scan_short()
+        for result in results:
+            if not was_sent_recently(result.symbol, result.side, SIGNAL_COOLDOWN_HOURS, result.timeframe):
+                save(result, update.effective_chat.id)
+        await _send_results(context.bot, update.effective_chat.id, results, short=True)
+    except Exception:
+        log.exception("short-term market scan failed")
+        await msg.reply_text("⚠️ Краткосрочный скан временно не выполнен.", reply_markup=menu())
 
-async def scan_cmd(u,c):
-    msg=u.effective_message
-    if daily_risk_guard()["locked"]:
-        return await msg.reply_text(guarded_text(),parse_mode=ParseMode.HTML,reply_markup=menu())
-    await msg.reply_text("🔎 Сканирую рынок...")
-    try:
-        rs=await scan()
-        if not rs: return await msg.reply_text("⚪ Сильных сигналов нет.",reply_markup=menu())
-        selected=None
-        for s in rs:
-            allowed,_=portfolio_allowed(u.effective_chat.id,s)
-            if allowed: selected=s; break
-        if not selected: return await msg.reply_text("🛡 Сигналы найдены, но портфельные лимиты запретили новую позицию.",reply_markup=menu())
-        signal_id=save(selected); register_paper_trade(u.effective_chat.id,signal_id,selected)
-        await msg.reply_text(signal_text(selected,u.effective_chat.id,True),parse_mode=ParseMode.HTML,reply_markup=menu())
-    except Exception as e: await msg.reply_text(f"Ошибка: {e}",reply_markup=menu())
 
-async def status(u,c):
-    rows=recent()
-    def line(r):
-        if r[6] and r[7] is not None: result=f" → {r[6]} ({r[7]:+.1f}R)"
-        elif r[5]=="WAITING": result=" → ожидает вход"
-        else: result=" → активен"
-        return f"{r[0][:16]} | {r[1]} {r[3]} | {r[4]:.0f}{result}"
-    await u.effective_message.reply_text("\n".join(line(r) for r in rows) or "История пуста.",reply_markup=menu())
+async def status(update, context):
+    rows = recent(15)
+    if not rows:
+        text = "🗂 История сигналов пока пуста."
+    else:
+        lines = ["🗂 <b>ПОСЛЕДНИЕ СИГНАЛЫ</b>", "━━━━━━━━━━━━━━━━━━"]
+        result_names={"TP2":"✅ TP2","SL":"🛑 STOP","ENTRY_EXPIRED":"⌛ НЕ АКТИВИРОВАН","EXPIRED":"⏱ ЗАВЕРШЁН"}
+        for created, symbol, timeframe, side, score, state, result, pnl_r in rows:
+            icon = "🟢" if side == "LONG" else "🔴"
+            outcome=result_names.get(result,"🟡 ОЖИДАЕТ" if state=="SENT" else "🔵 АКТИВЕН")
+            if pnl_r is not None and result not in ("ENTRY_EXPIRED",None):
+                outcome+=f" · {pnl_r:+.2f}R"
+            lines.append(f"{icon} {created[:16]} · <b>{symbol}</b> · {timeframe} · {side} · {score:.0f}/100\n└ {outcome}")
+        text = "\n".join(lines)
+    await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=menu())
 
-async def stats(u,c):
-    row,by_side,opened=quality_stats(30)
-    total,tp1,tp2,tp3,sl,expired,avg_r,sum_r,avg_mae=row
-    if not total:
-        return await u.effective_message.reply_text("📈 Закрытых сигналов пока нет. Статистика появится после TP/SL.",reply_markup=menu())
-    wins=(tp1 or 0)+(tp2 or 0)+(tp3 or 0)
-    lines=["📈 <b>СТАТИСТИКА ЗА 30 ДНЕЙ</b>","",
-        f"Закрыто: <b>{total}</b> | Открыто: <b>{opened}</b>",
-        f"Достигли цели: <b>{wins}</b> | SL: <b>{sl or 0}</b>",
-        f"Истекли по времени: <b>{expired or 0}</b>",
-        f"Доля прибыльных: <b>{wins/total*100:.1f}%</b>",
-        f"Средний результат: <b>{(avg_r or 0):+.2f}R</b>",
-        f"Суммарный результат: <b>{(sum_r or 0):+.2f}R</b>",
-        f"Средняя максимальная просадка: <b>{(avg_mae or 0):.2f}R</b>"]
-    for side,count,side_r,winrate in by_side:
-        lines.append(f"{side}: {count} | {(winrate or 0):.1f}% | {(side_r or 0):+.2f}R")
-    lines.append("\n⚠️ Статистика модели не гарантирует будущий результат.")
-    await u.effective_message.reply_text("\n".join(lines),parse_mode=ParseMode.HTML,reply_markup=menu())
 
-def _price_text(symbol,row):
-    arrow="🟢" if row["change"]>=0 else "🔴"
-    return f'{arrow} <b>{symbol.replace("USDT","")}/USDT</b>: {row["price"]:.8g} ({row["change"]:+.2f}%)'
+def _price_text(symbol, row):
+    arrow = "🟢" if row["change"] >= 0 else "🔴"
+    return f'{arrow} <b>{symbol.removesuffix("USDT")}/USDT</b>  {row["price"]:.8g}  <b>{row["change"]:+.2f}%</b>'
 
-async def prices(u,c):
-    rows=await get_prices([f"{x}USDT" for x in TOP_COINS])
-    await u.effective_message.reply_text("<b>Актуальные цены Binance Futures</b>\n\n"+
-        "\n".join(_price_text(s,r) for s,r in rows.items()),parse_mode=ParseMode.HTML,reply_markup=menu())
 
-async def movers(u,c):
-    rows=await get_tickers()
-    liquid=[(s,r) for s,r in rows.items() if s.endswith("USDT") and r["quote_volume"]>=15_000_000]
-    up=sorted(liquid,key=lambda x:x[1]["change"],reverse=True)[:5]
-    down=sorted(liquid,key=lambda x:x[1]["change"])[:5]
-    text="🚀 <b>Топ роста 24ч</b>\n"+"\n".join(_price_text(s,r) for s,r in up)
-    text+="\n\n📉 <b>Топ падения 24ч</b>\n"+"\n".join(_price_text(s,r) for s,r in down)
-    await u.effective_message.reply_text(text,parse_mode=ParseMode.HTML,reply_markup=menu())
+async def prices(update, context):
+    rows = await get_prices([f"{coin}USDT" for coin in TOP_COINS])
+    text = "💹 <b>РЫНОК СЕЙЧАС</b>\n━━━━━━━━━━━━━━━━━━\n" + "\n".join(_price_text(s, r) for s, r in rows.items())
+    await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=menu())
 
-async def alerts_on(u,c):
-    subscribe(u.effective_chat.id,True)
-    await u.effective_message.reply_text(f"🔔 Автосигналы включены. Проверка каждые {AUTO_SCAN_INTERVAL_MIN} минут.",reply_markup=menu())
 
-async def alerts_off(u,c):
-    subscribe(u.effective_chat.id,False)
-    await u.effective_message.reply_text("🔕 Автосигналы выключены.",reply_markup=menu())
+async def movers(update, context):
+    rows = await get_tickers()
+    liquid = [(s, r) for s, r in rows.items() if s.endswith("USDT") and r["quote_volume"] >= 15_000_000]
+    up = sorted(liquid, key=lambda item: item[1]["change"], reverse=True)[:5]
+    down = sorted(liquid, key=lambda item: item[1]["change"])[:5]
+    text = "🚀 <b>ЛИДЕРЫ РОСТА 24Ч</b>\n" + "\n".join(_price_text(s, r) for s, r in up)
+    text += "\n\n📉 <b>ЛИДЕРЫ ПАДЕНИЯ 24Ч</b>\n" + "\n".join(_price_text(s, r) for s, r in down)
+    await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=menu())
 
-async def clear_chat(u,c):
-    chat_id=u.effective_chat.id
-    last_id=u.effective_message.message_id
-    deleted=0
-    for message_id in range(last_id,max(0,last_id-80),-1):
+
+async def alerts_on(update, context):
+    subscribe(update.effective_chat.id, True)
+    await update.effective_message.reply_text(
+        f"✅ <b>АВТОСКАН ВКЛЮЧЁН</b>\nОтчёт будет приходить каждые {AUTO_SCAN_INTERVAL_MIN} минут — даже если сигналов нет.",
+        parse_mode=ParseMode.HTML, reply_markup=menu())
+
+
+async def alerts_off(update, context):
+    subscribe(update.effective_chat.id, False)
+    await update.effective_message.reply_text("🔕 Автоматические отчёты выключены.", reply_markup=menu())
+
+
+async def clear_chat(update, context):
+    chat_id, last_id, deleted = update.effective_chat.id, update.effective_message.message_id, 0
+    for message_id in range(last_id, max(0, last_id - 100), -1):
         try:
-            await c.bot.delete_message(chat_id,message_id); deleted+=1
+            await context.bot.delete_message(chat_id, message_id)
+            deleted += 1
         except Exception:
             pass
-    await c.bot.send_message(chat_id,f"🧹 Чат очищен. Удалено сообщений: {deleted}",reply_markup=menu())
+    await context.bot.send_message(chat_id, f"🧹 Очищено сообщений: {deleted}", reply_markup=menu())
 
-async def auto_scan(c):
-    chats=subscribers()
-    if not chats: return
-    if daily_risk_guard()["locked"]:
-        logging.warning("automatic signals paused by daily risk guard"); return
-    try: rows=await scan()
-    except Exception as e:
-        logging.exception("automatic scan failed: %s",e); return
-    fresh=[s for s in rows if not was_sent_recently(s.symbol,s.side,SIGNAL_COOLDOWN_HOURS)][:MAX_AUTO_SIGNALS]
-    for i,s in enumerate(fresh):
-        signal_id=None
-        for chat_id in chats:
-            allowed,reason=portfolio_allowed(chat_id,s)
-            if not allowed: continue
-            if signal_id is None: signal_id=save(s)
-            register_paper_trade(chat_id,signal_id,s)
-            try: await c.bot.send_message(chat_id,signal_text(s,chat_id,i==0),parse_mode=ParseMode.HTML,reply_markup=menu())
-            except Exception as e: logging.warning("send to %s failed: %s",chat_id,e)
 
-async def track_signals(c):
-    try: closed=await update_outcomes()
-    except Exception as e:
-        logging.exception("signal tracking failed: %s",e); return
-    if not closed: return
-    for event,signal_id,symbol,result,settled in closed:
-        for chat_id in paper_trade_chats(signal_id):
-            if event=="ACTIVE": text=f"✅ {symbol} · цена вошла в зону. Сигнал #{signal_id} теперь <b>АКТИВЕН</b>."
-            elif result=="ENTRY_EXPIRED": text=f"⌛ {symbol} · зона входа сигнала #{signal_id} не была достигнута. Сигнал отменён без сделки."
-            else: text=f"📍 {symbol} · сигнал #{signal_id} закрыт: <b>{result}</b>"
-            try: await c.bot.send_message(chat_id,text,parse_mode=ParseMode.HTML,reply_markup=menu())
-            except Exception as e: logging.warning("outcome send failed: %s",e)
-        for chat_id,pnl,balance in settled:
-            try: await c.bot.send_message(chat_id,f"🧾 Paper PnL: <b>{pnl:+.2f} USDT</b> · Баланс: <b>{balance:.2f} USDT</b>",parse_mode=ParseMode.HTML)
-            except Exception as e: logging.warning("paper outcome send failed: %s",e)
-
-async def callback(u,c):
-    q=u.callback_query; await q.answer()
-    if q.data=="prices": return await prices(u,c)
-    if q.data=="movers": return await movers(u,c)
-    if q.data=="scan": return await scan_cmd(u,c)
-    if q.data=="alerts_on": return await alerts_on(u,c)
-    if q.data=="alerts_off": return await alerts_off(u,c)
-    if q.data=="clear_chat": return await clear_chat(u,c)
-    if q.data=="status": return await status(u,c)
-    if q.data=="stats": return await stats(u,c)
-    if q.data=="risk_info":
-        c.args=[]; return await risk(u,c)
-    if q.data=="paper": return await paper(u,c)
-    if q.data=="backtest_btc":
-        c.args=["BTC","1h"]; return await backtest(u,c)
-    if q.data.startswith("analyze:"):
-        c.args=[q.data.split(":",1)[1]]; return await signal(u,c)
-    if q.data.startswith("price:"):
-        sym=q.data.split(":",1)[1]; row=(await get_prices([sym])).get(sym)
-        await q.message.reply_text(_price_text(sym,row) if row else "Цена недоступна.",parse_mode=ParseMode.HTML,reply_markup=menu(sym))
-
-async def backtest(u,c):
-    sym=(c.args[0] if c.args else "BTCUSDT").upper()
-    if not sym.endswith("USDT"): sym+="USDT"
-    tf=c.args[1] if len(c.args)>1 else "1h"
-    msg=u.effective_message
-    await msg.reply_text("🧪 Проверяю стратегию на истории...")
+async def auto_scan(context):
+    chats = subscribers()
+    if not chats:
+        return
+    if _scan_lock.locked():
+        log.info("automatic scan skipped: another scan is running")
+        return
     try:
-        r=await bt(sym,tf)
-        warning="\n⚠️ Выборка мала — выводы делать рано." if r['trades']<20 else ""
-        await msg.reply_text(f"🧪 <b>{sym} {tf}</b>\nСделок: {r['trades']}\nУспешных: {r['wins']}\n"
-            f"Убыточных: {r['losses']}\nДоля прибыльных: {r['win_rate']:.1f}%\n"
-            f"Результат: {r['net_r']:+.2f}R\nProfit Factor: {r['profit_factor']:.2f}\n"
-            f"Макс. просадка: {r['max_drawdown_r']:.2f}R\nУчтённые издержки: {r['cost_pct']:.2f}%{warning}",
-            parse_mode=ParseMode.HTML,reply_markup=menu())
-    except Exception as e: await msg.reply_text(f"Ошибка: {e}",reply_markup=menu())
+        async with _scan_lock:
+            all_results = await scan()
+        fresh = [r for r in all_results if not was_sent_recently(r.symbol, r.side, SIGNAL_COOLDOWN_HOURS, r.timeframe)]
+        for result in fresh:
+            save(result)
+        for chat_id in chats:
+            try:
+                if all_results and not fresh:
+                    stamp = datetime.now(timezone.utc).strftime("%H:%M UTC")
+                    await context.bot.send_message(
+                        chat_id,
+                        f"📡 <b>АВТОСКАН ЗАВЕРШЁН</b> · {stamp}\n━━━━━━━━━━━━━━━━━━\n"
+                        f"Сильных условий на рынке: <b>{len(all_results)}</b>.\n"
+                        f"Новых сигналов нет: эти пары уже отправлялись в последние {SIGNAL_COOLDOWN_HOURS} ч.",
+                        parse_mode=ParseMode.HTML, reply_markup=menu())
+                else:
+                    await _send_results(context.bot, chat_id, fresh, automatic=True)
+            except Exception:
+                log.exception("automatic report delivery failed for chat %s", chat_id)
+    except Exception:
+        log.exception("automatic scan failed")
+        for chat_id in chats:
+            try:
+                await context.bot.send_message(
+                    chat_id,
+                    "⚠️ <b>АВТОСКАН НЕ ВЫПОЛНЕН</b>\nИсточник рыночных данных временно недоступен. Следующая попытка будет автоматически.",
+                    parse_mode=ParseMode.HTML, reply_markup=menu())
+            except Exception:
+                log.exception("automatic error delivery failed for chat %s", chat_id)
+
+
+async def track_signal_outcomes(context):
+    """Background quality journal; no paper account and no test commands."""
+    try:
+        events=await update_outcomes()
+    except Exception:
+        log.exception("signal outcome tracking failed")
+        return
+    if not events:
+        return
+    all_subscribers=subscribers()
+    labels={"TP2":"✅ достигнута цель 2 (+2R)","SL":"🛑 достигнут стоп-лосс (-1R)",
+            "ENTRY_EXPIRED":"⌛ зона входа не была достигнута — сигнал отменён",
+            "EXPIRED":"⏱ время сигнала истекло"}
+    for event,signal_id,symbol,result,source_chat_id in events:
+        recipients=[source_chat_id] if source_chat_id is not None else all_subscribers
+        if event=="ACTIVE":
+            text=f"🎯 <b>{symbol}</b> · цена вошла в зону. Сигнал #{signal_id} активирован."
+        else:
+            text=f"📍 <b>{symbol}</b> · {labels.get(result,result)} · сигнал #{signal_id}."
+        for chat_id in recipients:
+            try:
+                await context.bot.send_message(chat_id,text,parse_mode=ParseMode.HTML,reply_markup=menu())
+            except Exception:
+                log.exception("outcome delivery failed for chat %s",chat_id)
+
+
+async def callback(update, context):
+    query = update.callback_query
+    await query.answer()
+    actions = {"prices": prices, "movers": movers, "scan": scan_cmd, "short_scan": short_scan_cmd, "alerts_on": alerts_on,
+               "alerts_off": alerts_off, "clear_chat": clear_chat, "status": status}
+    if query.data in actions:
+        return await actions[query.data](update, context)
+    if query.data.startswith("analyze:"):
+        context.args = [query.data.split(":", 1)[1]]
+        return await signal(update, context)
+    if query.data.startswith("price:"):
+        symbol = query.data.split(":", 1)[1]
+        row = (await get_prices([symbol])).get(symbol)
+        return await query.message.reply_text(
+            _price_text(symbol, row) if row else "Цена временно недоступна.",
+            parse_mode=ParseMode.HTML, reply_markup=menu(symbol))
+
+
+async def post_init(application):
+    await application.bot.set_my_commands([
+        BotCommand("start", "главное меню"), BotCommand("scan", "сканировать весь рынок"),
+        BotCommand("short", "краткосрочные сделки"),
+        BotCommand("signal", "анализ монеты: /signal BTC"), BotCommand("prices", "цены топ-монет"),
+        BotCommand("movers", "лидеры роста и падения"), BotCommand("status", "история сигналов"),
+        BotCommand("alerts_on", "включить автоскан"), BotCommand("alerts_off", "выключить автоскан"),
+    ])
+
 
 def main():
     if not TELEGRAM_BOT_TOKEN:
         raise RuntimeError("Add TELEGRAM_BOT_TOKEN to .env")
-
     init()
-
-    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", start))
-    app.add_handler(CommandHandler("signal", signal))
-    app.add_handler(CommandHandler("scan", scan_cmd))
-    app.add_handler(CommandHandler("status", status))
-    app.add_handler(CommandHandler("stats", stats))
-    app.add_handler(CommandHandler("risk", risk))
-    app.add_handler(CommandHandler("paper", paper))
-    app.add_handler(CommandHandler("paper_reset", paper_reset))
-    app.add_handler(CommandHandler("prices", prices))
-    app.add_handler(CommandHandler("movers", movers))
-    app.add_handler(CommandHandler("alerts_on", alerts_on))
-    app.add_handler(CommandHandler("alerts_off", alerts_off))
-    app.add_handler(CommandHandler("backtest", backtest))
-    app.add_handler(CallbackQueryHandler(callback))
-
-    app.job_queue.run_repeating(auto_scan,interval=AUTO_SCAN_INTERVAL_MIN*60,first=60,name="market-auto-scan")
-    app.job_queue.run_repeating(track_signals,interval=120,first=90,name="signal-outcome-tracker")
-
-    app.run_polling()
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(post_init).build()
+    for command, handler in [
+        ("start", start), ("help", start), ("signal", signal), ("scan", scan_cmd), ("short", short_scan_cmd),
+        ("status", status), ("prices", prices), ("movers", movers),
+        ("alerts_on", alerts_on), ("alerts_off", alerts_off),
+    ]:
+        application.add_handler(CommandHandler(command, handler))
+    application.add_handler(CallbackQueryHandler(callback))
+    application.job_queue.run_repeating(auto_scan, interval=AUTO_SCAN_INTERVAL_MIN * 60, first=30, name="market-auto-scan")
+    application.job_queue.run_repeating(track_signal_outcomes, interval=120, first=90, name="signal-quality-journal")
+    application.run_polling(drop_pending_updates=False)
 
 
 if __name__ == "__main__":

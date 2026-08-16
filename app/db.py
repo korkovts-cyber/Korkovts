@@ -7,7 +7,7 @@ EXTRA_SIGNAL_COLUMNS={
     "closed_at":"TEXT", "result":"TEXT", "exit_price":"REAL", "pnl_r":"REAL",
     "last_checked_at":"TEXT", "max_favorable_r":"REAL DEFAULT 0",
     "max_adverse_r":"REAL DEFAULT 0", "strategy_version":"TEXT DEFAULT 'legacy'",
-    "activated_at":"TEXT"
+    "activated_at":"TEXT", "source_chat_id":"INTEGER"
 }
 
 def init():
@@ -36,11 +36,11 @@ def init():
             if name not in existing:
                 c.execute(f"ALTER TABLE signals ADD COLUMN {name} {definition}")
 
-def save(s):
+def save(s,chat_id=None):
     with sqlite3.connect(DATABASE_PATH) as c:
-        cur=c.execute("INSERT INTO signals(symbol,timeframe,side,score,entry,stop,tp1,tp2,tp3,last_checked_at,strategy_version,status) VALUES(?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,?,'WAITING')",
+        cur=c.execute("INSERT INTO signals(symbol,timeframe,side,score,entry,stop,tp1,tp2,tp3,last_checked_at,strategy_version,status,source_chat_id) VALUES(?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,?,'SENT',?)",
                       (s.symbol,s.timeframe,s.side,s.score,s.entry_high if s.side=='LONG' else s.entry_low,
-                       s.stop,s.tp1,s.tp2,s.tp3,STRATEGY_VERSION))
+                       s.stop,s.tp1,s.tp2,s.tp3,STRATEGY_VERSION,int(chat_id) if chat_id is not None else None))
         return cur.lastrowid
 
 def recent(n=10):
@@ -50,25 +50,25 @@ def recent(n=10):
 def open_signals(n=100):
     with sqlite3.connect(DATABASE_PATH) as c:
         c.row_factory=sqlite3.Row
-        return [dict(r) for r in c.execute('''SELECT id,created_at,activated_at,last_checked_at,status,symbol,side,entry,stop,tp1,tp2,tp3,
-            max_favorable_r,max_adverse_r FROM signals WHERE status IN ('WAITING','ACTIVE','OPEN') ORDER BY id LIMIT ?''',(n,))]
+        return [dict(r) for r in c.execute('''SELECT id,created_at,activated_at,last_checked_at,status,symbol,timeframe,side,entry,stop,tp1,tp2,tp3,
+            max_favorable_r,max_adverse_r,source_chat_id FROM signals WHERE status IN ('SENT','WAITING','ACTIVE','OPEN') ORDER BY id LIMIT ?''',(n,))]
 
 def activate_signal(signal_id,activated_at):
     with sqlite3.connect(DATABASE_PATH) as c:
-        c.execute("UPDATE signals SET status='ACTIVE',activated_at=?,last_checked_at=? WHERE id=? AND status IN ('WAITING','OPEN')",
+        c.execute("UPDATE signals SET status='ACTIVE',activated_at=?,last_checked_at=? WHERE id=? AND status IN ('SENT','WAITING','OPEN')",
                   (activated_at,activated_at,int(signal_id)))
 
 def checkpoint(signal_id,checked_at,max_favorable_r,max_adverse_r):
     with sqlite3.connect(DATABASE_PATH) as c:
         c.execute('''UPDATE signals SET last_checked_at=?,max_favorable_r=max(max_favorable_r,?),
-            max_adverse_r=max(max_adverse_r,?) WHERE id=? AND status IN ('WAITING','ACTIVE','OPEN') ''',
+            max_adverse_r=max(max_adverse_r,?) WHERE id=? AND status IN ('SENT','WAITING','ACTIVE','OPEN') ''',
             (checked_at,float(max_favorable_r),float(max_adverse_r),int(signal_id)))
 
 def close_signal(signal_id,result,exit_price,pnl_r,closed_at,max_favorable_r,max_adverse_r):
     with sqlite3.connect(DATABASE_PATH) as c:
         c.execute('''UPDATE signals SET status='CLOSED',result=?,exit_price=?,pnl_r=?,closed_at=?,last_checked_at=?,
             max_favorable_r=max(max_favorable_r,?),max_adverse_r=max(max_adverse_r,?)
-            WHERE id=? AND status IN ('WAITING','ACTIVE','OPEN') ''',(result,float(exit_price),float(pnl_r),closed_at,closed_at,
+            WHERE id=? AND status IN ('SENT','WAITING','ACTIVE','OPEN') ''',(result,float(exit_price),float(pnl_r),closed_at,closed_at,
             float(max_favorable_r),float(max_adverse_r),int(signal_id)))
 
 def quality_stats(days=30):
@@ -83,18 +83,18 @@ def quality_stats(days=30):
         open_count=c.execute("SELECT COUNT(*) FROM signals WHERE status IN ('WAITING','ACTIVE','OPEN')").fetchone()[0]
     return row,by_side,open_count
 
-def calibration_penalty(symbol,side,min_samples=12):
+def calibration_penalty(symbol,side,timeframe,min_samples=20):
     """Only tightens the filter after enough forward results; never loosens it."""
     with sqlite3.connect(DATABASE_PATH) as c:
         row=c.execute('''SELECT COUNT(*),AVG(pnl_r),SUM(result IN ('TP1','TP2','TP3'))*100.0/COUNT(*)
             FROM signals WHERE status='CLOSED' AND result!='ENTRY_EXPIRED'
-            AND strategy_version=? AND symbol=? AND side=?''',
-            (STRATEGY_VERSION,symbol,side)).fetchone()
+            AND strategy_version=? AND symbol=? AND side=? AND timeframe=?''',
+            (STRATEGY_VERSION,symbol,side,timeframe)).fetchone()
         if not row or row[0]<min_samples:
             row=c.execute('''SELECT COUNT(*),AVG(pnl_r),SUM(result IN ('TP1','TP2','TP3'))*100.0/COUNT(*)
                 FROM signals WHERE status='CLOSED' AND result!='ENTRY_EXPIRED'
-                AND strategy_version=? AND side=?''',
-                (STRATEGY_VERSION,side)).fetchone()
+                AND strategy_version=? AND side=? AND timeframe=?''',
+                (STRATEGY_VERSION,side,timeframe)).fetchone()
     count,avg_r,winrate=row or (0,0,0)
     if count<min_samples: return 0
     if (avg_r or 0)<-0.15 or (winrate or 0)<35: return 8
@@ -223,7 +223,10 @@ def subscribers():
     with sqlite3.connect(DATABASE_PATH) as c:
         return [r[0] for r in c.execute("SELECT chat_id FROM subscribers WHERE enabled=1").fetchall()]
 
-def was_sent_recently(symbol,side,hours=6):
+def was_sent_recently(symbol,side,hours=6,timeframe=None):
     with sqlite3.connect(DATABASE_PATH) as c:
+        if timeframe:
+            return c.execute('''SELECT 1 FROM signals WHERE symbol=? AND side=? AND timeframe=?
+            AND created_at>=datetime('now',?) LIMIT 1''',(symbol,side,timeframe,f'-{int(hours)} hours')).fetchone() is not None
         return c.execute('''SELECT 1 FROM signals WHERE symbol=? AND side=?
-        AND created_at>=datetime('now',?) LIMIT 1''',(symbol,side,f'-{int(hours)} hours')).fetchone() is not None
+            AND created_at>=datetime('now',?) LIMIT 1''',(symbol,side,f'-{int(hours)} hours')).fetchone() is not None

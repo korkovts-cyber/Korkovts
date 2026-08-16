@@ -12,11 +12,10 @@ TOP_COINS=tuple(x.strip().upper() for x in os.getenv(
     "TOP_COINS","BTC,ETH,BNB,SOL,XRP,DOGE"
 ).split(",") if x.strip())
 AUTO_SCAN_INTERVAL_MIN=int(os.getenv("AUTO_SCAN_INTERVAL_MIN","10"))
-MAX_AUTO_SIGNALS=int(os.getenv("MAX_AUTO_SIGNALS","1"))
-SIGNAL_COOLDOWN_HOURS=int(os.getenv("SIGNAL_COOLDOWN_HOURS","12"))
-DEEP_ANALYSIS_LIMIT=int(os.getenv("DEEP_ANALYSIS_LIMIT","25"))
+SIGNAL_COOLDOWN_HOURS=int(os.getenv("SIGNAL_COOLDOWN_HOURS","6"))
+DEEP_ANALYSIS_LIMIT=int(os.getenv("DEEP_ANALYSIS_LIMIT","0"))  # 0 = deep-check every candidate
 SIGNAL_MAX_AGE_HOURS=int(os.getenv("SIGNAL_MAX_AGE_HOURS","48"))
-STRATEGY_VERSION=os.getenv("STRATEGY_VERSION","3.0")
+STRATEGY_VERSION=os.getenv("STRATEGY_VERSION","4.0")
 DEFAULT_RISK_PCT=float(os.getenv("DEFAULT_RISK_PCT","0.5"))
 MAX_RISK_PCT=float(os.getenv("MAX_RISK_PCT","1.0"))
 DAILY_STOP_R=float(os.getenv("DAILY_STOP_R","-2.0"))
