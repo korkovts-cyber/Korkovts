@@ -182,11 +182,31 @@ def analyze(symbol,timeframe,df,higher=None,min_score=75,lower=None,market_bias=
     pullback_short=(short_trend and -0.75<=distance_atr<=0 and a.close<a.open
                     and a.macd_hist<0 and a.macd_hist<p.macd_hist
                     and a.stoch_rsi<p.stoch_rsi)
+    # A healthy trend often resumes without revisiting EMA20 or printing a new
+    # 20-bar extreme.  The previous release recognized only those two rare
+    # entry shapes and could therefore reject every liquid market even when
+    # several symbols had aligned HTF trend, momentum and money flow.  Admit a
+    # controlled continuation only while price is not overextended and the
+    # move remains efficient; all final derivatives/ADL/spread gates still run.
+    continuation_long=(long_trend and .35<=distance_atr<=1.60
+                       and a.adx>=22 and a.efficiency20>=.25
+                       and 52<=a.rsi<=70 and a.macd_hist>0 and a.close>a.vwap20)
+    continuation_short=(short_trend and -1.60<=distance_atr<=-.35
+                        and a.adx>=22 and a.efficiency20>=.25
+                        and 30<=a.rsi<=48 and a.macd_hist<0 and a.close<a.vwap20)
     if derivatives is not None:
         breakout_long=breakout_long and oi_change>=0.5 and price_change>=0.3 and taker>=1.03
         breakout_short=breakout_short and oi_change>=0.5 and price_change<=-0.3 and taker<=0.97
-    setup_long="ПРОБОЙ С ОБЪЁМОМ И OI" if breakout_long else ("ОТКАТ ПО ТРЕНДУ" if pullback_long else None)
-    setup_short="ПРОБОЙ С ОБЪЁМОМ И OI" if breakout_short else ("ОТКАТ ПО ТРЕНДУ" if pullback_short else None)
+        continuation_long=(continuation_long and oi_change>=.2
+                           and price_change>=.15 and taker>=1.03)
+        continuation_short=(continuation_short and oi_change>=.2
+                            and price_change<=-.15 and taker<=.97)
+    setup_long=("ПРОБОЙ С ОБЪЁМОМ И OI" if breakout_long else
+                ("ОТКАТ ПО ТРЕНДУ" if pullback_long else
+                 ("КОНТРОЛИРУЕМОЕ ПРОДОЛЖЕНИЕ ТРЕНДА" if continuation_long else None)))
+    setup_short=("ПРОБОЙ С ОБЪЁМОМ И OI" if breakout_short else
+                 ("ОТКАТ ПО ТРЕНДУ" if pullback_short else
+                  ("КОНТРОЛИРУЕМОЕ ПРОДОЛЖЕНИЕ ТРЕНДА" if continuation_short else None)))
     if setup_long: lr.append(f"сценарий: {setup_long.lower()}")
     if setup_short: sr.append(f"сценарий: {setup_short.lower()}")
 
@@ -237,6 +257,9 @@ def analyze(symbol,timeframe,df,higher=None,min_score=75,lower=None,market_bias=
         if breakout_long:
             anchor=float(a.high20); lo=anchor-vol*.10; hi=anchor+vol*.10; entry=hi
             stop=anchor-vol*1.25
+        elif continuation_long:
+            lo=price-vol*.10; hi=price+vol*.10; entry=hi
+            stop=min(entry-vol*1.25,float(a.ema20)-vol*.35)
         else:
             lo=price-vol*.20; hi=price+vol*.05; entry=hi
             stop=min(entry-vol*1.35,support-vol*.10)
@@ -263,6 +286,9 @@ def analyze(symbol,timeframe,df,higher=None,min_score=75,lower=None,market_bias=
         if breakout_short:
             anchor=float(a.low20); lo=anchor-vol*.10; hi=anchor+vol*.10; entry=lo
             stop=anchor+vol*1.25
+        elif continuation_short:
+            lo=price-vol*.10; hi=price+vol*.10; entry=lo
+            stop=max(entry+vol*1.25,float(a.ema20)+vol*.35)
         else:
             lo=price-vol*.05; hi=price+vol*.20; entry=lo
             stop=max(entry+vol*1.35,resistance+vol*.10)

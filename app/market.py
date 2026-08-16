@@ -15,6 +15,19 @@ _INTERVAL_SECONDS={"1m":60,"3m":180,"5m":300,"15m":900,"30m":1800,
                    "1h":3600,"2h":7200,"4h":14400,"6h":21600,"8h":28800,
                    "12h":43200,"1d":86400}
 
+def _normalize_adl_risk(value):
+    """Translate Binance's public ADL labels to the strategy vocabulary."""
+    risk=str(value or "unknown").strip().lower()
+    return "medium" if risk in ("middle","moderate") else risk
+
+def _normalize_adl_row(value):
+    """Keep an unexpected scalar ADL response from breaking a whole scan."""
+    row=dict(value) if isinstance(value,dict) else {"risk":value}
+    row["risk"]=_normalize_adl_risk(row.get("risk","unknown"))
+    row.setdefault("fresh",False)
+    row.setdefault("age_minutes",9999)
+    return row
+
 def _http_client():
     global _client
     if _client is None or _client.is_closed:
@@ -130,7 +143,7 @@ async def get_adl_risks(symbol=None):
         update_ms=int(row.get("updateTime",0) or 0)
         age_min=max(0.0,(time.time()*1000-update_ms)/60000) if update_ms else 9999.0
         result[str(row["symbol"])]= {
-            "risk":str(row.get("adlRisk","unknown")).lower(),
+            "risk":_normalize_adl_risk(row.get("adlRisk","unknown")),
             "update_time":update_ms,
             "age_minutes":age_min,
             "fresh":age_min<=ADL_MAX_AGE_MINUTES,
@@ -152,20 +165,29 @@ async def get_derivatives_snapshot(symbol,adl=None):
         _get("/futures/data/basis",{"pair":symbol,"contractType":"PERPETUAL","period":"1h","limit":25}),
         adl_request,return_exceptions=True)
     data={name:(None if isinstance(value,Exception) else value) for name,value in zip(names,values)}
-    premium=data["premium"] or {}; oi=data["oi"] or {}; oi_hist=data["oi_hist"] or []
-    taker=data["taker"] or []; global_ls=data["global_ls"] or []
-    top_pos=data["top_pos"] or []; depth=data["depth"] or {}; basis_hist=data["basis_hist"] or []
-    adl_map=data["adl"] or {}; adl_row=adl_map.get(symbol,{}) if isinstance(adl_map,dict) else {}
+    # Binance occasionally answers a data endpoint with a JSON scalar/object
+    # while still returning HTTP 200.  Treat that one component as unavailable
+    # instead of iterating it as a list and aborting every deep candidate.
+    premium=data["premium"] if isinstance(data["premium"],dict) else {}
+    oi=data["oi"] if isinstance(data["oi"],dict) else {}
+    oi_hist=data["oi_hist"] if isinstance(data["oi_hist"],list) else []
+    taker=data["taker"] if isinstance(data["taker"],list) else []
+    global_ls=data["global_ls"] if isinstance(data["global_ls"],list) else []
+    top_pos=data["top_pos"] if isinstance(data["top_pos"],list) else []
+    depth=data["depth"] if isinstance(data["depth"],dict) else {}
+    basis_hist=data["basis_hist"] if isinstance(data["basis_hist"],list) else []
+    adl_map=data["adl"] or {}
+    adl_value=adl_map.get(symbol,{}) if isinstance(adl_map,dict) else {}
+    adl_row=_normalize_adl_row(adl_value)
     available={
-        "premium":isinstance(premium,dict) and bool(premium.get("markPrice"))
-                  and bool(premium.get("indexPrice")),
-        "oi":isinstance(oi,dict) and bool(oi.get("openInterest")),
-        "oi_hist":isinstance(oi_hist,list) and len(oi_hist)>=2,
-        "taker":isinstance(taker,list) and len(taker)>=3,
-        "global_ls":isinstance(global_ls,list) and len(global_ls)>=1,
-        "top_pos":isinstance(top_pos,list) and len(top_pos)>=1,
+        "premium":bool(premium.get("markPrice")) and bool(premium.get("indexPrice")),
+        "oi":bool(oi.get("openInterest")),
+        "oi_hist":len(oi_hist)>=2,
+        "taker":len(taker)>=3,
+        "global_ls":len(global_ls)>=1,
+        "top_pos":len(top_pos)>=1,
         "depth":bool(depth.get("bids")) and bool(depth.get("asks")),
-        "basis_hist":isinstance(basis_hist,list) and len(basis_hist)>=2,
+        "basis_hist":len(basis_hist)>=2,
         "adl":isinstance(adl_row,dict) and str(adl_row.get("risk","unknown")).lower()!="unknown",
     }
     missing=[name for name,is_available in available.items() if not is_available]
@@ -188,7 +210,7 @@ async def get_derivatives_snapshot(symbol,adl=None):
     # final strategy actively gates on them instead of treating them as telemetry.
     core_ok=all(available[name] for name in
                 ("premium","oi","oi_hist","taker","global_ls","top_pos","depth","adl"))
-    adl_risk=str(adl_row.get("risk","unknown")).lower()
+    adl_risk=_normalize_adl_risk(adl_row.get("risk","unknown"))
     adl_fresh=bool(adl_row.get("fresh",False))
     return {"funding":float(premium.get("lastFundingRate",0)),"mark_price":mark,
             "open_interest":float(oi.get("openInterest",0)),"oi_change_pct":oi_change,
