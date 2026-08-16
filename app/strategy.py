@@ -101,6 +101,9 @@ def analyze(symbol,timeframe,df,higher=None,min_score=75,lower=None,market_bias=
         if z.close<z.ema20 and z.macd_hist<0: S+=6; quality_short+=1; sr.append(f"точка входа подтверждена на {lower_label}")
     if market_bias=="LONG": L+=5; lr.append("рынок BTC направлен вверх")
     elif market_bias=="SHORT": S+=5; sr.append("рынок BTC направлен вниз")
+    elif (market_context or {}).get("independent_mode"):
+        lr.append("нейтральный BTC: монета подтверждается независимо")
+        sr.append("нейтральный BTC: монета подтверждается независимо")
     funding=float((derivatives or {}).get("funding",0))
     oi=float((derivatives or {}).get("open_interest",0))
     micro_long=micro_short=0

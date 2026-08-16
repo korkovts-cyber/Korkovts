@@ -12,7 +12,6 @@ from .config import (
     APP_VERSION,
     AUTO_SCAN_INTERVAL_MIN,
     DATABASE_PATH,
-    MIN_SIGNAL_SCORE,
     SIGNAL_COOLDOWN_HOURS,
     STRATEGY_VERSION,
     TELEGRAM_BOT_TOKEN,
@@ -48,7 +47,14 @@ from .market import (
     get_tickers,
     kline_cache_status,
 )
-from .scanner import market_state, scan, scan_short, scan_status
+from .scanner import (
+    market_analysis_state,
+    market_state,
+    scan,
+    scan_short,
+    scan_status,
+    scan_thresholds,
+)
 from .strategy import analyze, fmt
 from .tracker import update_outcomes
 
@@ -86,6 +92,7 @@ async def start(update, context):
         "📡 Весь рынок Binance Futures USDT-M\n"
         "🧠 Многофакторный анализ 15m · 1H · 4H\n"
         "🧯 ADL-риск Binance · ширина рынка · кластеры корреляции\n"
+        "🔎 При исходно нейтральном BTC бот ищет независимые сетапы монет с повышенным порогом\n"
         f"⏱ Автоскан каждые {AUTO_SCAN_INTERVAL_MIN} минут — уведомления только о новых сигналах\n\n"
         f"🧠 Повтор {SIGNAL_COOLDOWN_HOURS}ч блокируется по монете, направлению и таймфрейму\n"
         "Бот показывает <b>все найденные сильные сигналы</b>, а лучший ставит первым. "
@@ -105,9 +112,12 @@ async def _analyze_symbol(symbol):
     )
     oi_notional=float(derivatives.get("open_interest",0))*float(derivatives.get("mark_price",0))
     derivatives.update(liquidation_snapshot(symbol,oi_notional))
-    threshold = min(94, MIN_SIGNAL_SCORE + state["score_adjustment"])
-    return analyze(symbol, "1H", hourly, higher, threshold, lower, state["bias"], derivatives,
-                   for_symbol(news, symbol),state)
+    analysis_state,neutral_mode=market_analysis_state(state)
+    if state.get("breadth_blocked") and not neutral_mode:
+        return None
+    threshold=scan_thresholds(state)["main"]
+    return analyze(symbol,"1H",hourly,higher,threshold,lower,analysis_state["bias"],derivatives,
+                   for_symbol(news,symbol),analysis_state)
 
 
 async def signal(update, context):
@@ -132,17 +142,35 @@ async def signal(update, context):
         await msg.reply_text("⚠️ Не удалось получить все рыночные данные. Попробуй ещё раз через минуту.", reply_markup=menu())
 
 
-async def _send_results(bot, chat_id, results, automatic=False, short=False):
+async def _send_results(bot,chat_id,results,automatic=False,short=False,diagnostics=None):
     label = "КОРОТКИЕ СДЕЛКИ" if short else ("АВТОСКАН" if automatic else "СКАН РЫНКА")
     stamp = datetime.now(timezone.utc).strftime("%H:%M UTC")
     if not results:
         if automatic:
             return None
+        details=""
+        if diagnostics and diagnostics.get("status")=="ok":
+            details=(
+                f"\n\n🔎 Проверено: <b>{diagnostics.get('liquid',0)} ликвидных</b> → "
+                f"<b>{diagnostics.get('prefiltered',0)} кандидатов</b> → <b>0 сигналов</b>.\n"
+                f"Порог скана: <b>{float(diagnostics.get('threshold',0)):.0f}</b>."
+            )
+            if diagnostics.get("independent_mode"):
+                details+=(
+                    "\nBTC нейтрален, но скан <b>не блокировался</b>: "
+                    "каждая монета была проверена как независимый сетап."
+                )
+            if int(diagnostics.get("prefiltered",0)):
+                details+=(
+                    f"\nПосле проверки OI, taker-flow, ADL, спреда и новостей "
+                    f"отклонено: <b>{diagnostics.get('deep_rejected',0)}</b>."
+                )
         return await bot.send_message(
             chat_id,
             f"📡 <b>{label} ЗАВЕРШЁН</b> · {stamp}\n━━━━━━━━━━━━━━━━━━\n"
             "⚪ Сильных подтверждённых сигналов сейчас нет.\n"
-            "Бот продолжит наблюдение — отсутствие сделки тоже является результатом анализа.",
+            "Бот продолжит наблюдение — отсутствие сделки тоже является результатом анализа."
+            f"{details}",
             parse_mode=ParseMode.HTML, reply_markup=menu())
     clusters=len({result.cluster_id for result in results if result.cluster_id})
     await bot.send_message(
@@ -167,7 +195,9 @@ async def scan_cmd(update, context):
     try:
         async with _scan_lock:
             results = await scan()
-        await _send_results(context.bot, update.effective_chat.id, results)
+        await _send_results(
+            context.bot,update.effective_chat.id,results,
+            diagnostics=scan_status().get("main"))
         for result in results:
             if not was_sent_recently(result.symbol, result.side, SIGNAL_COOLDOWN_HOURS, result.timeframe):
                 save(result, update.effective_chat.id)
@@ -184,7 +214,9 @@ async def short_scan_cmd(update, context):
     try:
         async with _scan_lock:
             results = await scan_short()
-        await _send_results(context.bot, update.effective_chat.id, results, short=True)
+        await _send_results(
+            context.bot,update.effective_chat.id,results,short=True,
+            diagnostics=scan_status().get("short"))
         for result in results:
             if not was_sent_recently(result.symbol, result.side, SIGNAL_COOLDOWN_HOURS, result.timeframe):
                 save(result, update.effective_chat.id)
@@ -247,13 +279,14 @@ async def system_status(update, context):
                f"Когорта стратегии: <b>{STRATEGY_VERSION}</b>"]
         if state:
             breadth=state.get("breadth",{})
-            threshold=min(94,MIN_SIGNAL_SCORE+state["score_adjustment"])
+            thresholds=scan_thresholds(state)
             lines += [
                 f"Режим BTC: <b>{names.get(state['bias'],state['bias'])}</b>",
                 f"Состояние: <b>{state['label']}</b>",
                 f"ATR BTC 1H: <b>{state['btc_atr_pct']:.2f}%</b>",
                 f"Ширина рынка: <b>{float(breadth.get('up_ratio',.5))*100:.0f}% растут</b> · медиана <b>{float(breadth.get('median_change',0)):+.2f}%</b>",
-                f"Внутренний порог raw-score: <b>{threshold:.0f}</b>",
+                f"Порог 1H / 15M: <b>{thresholds['main']:.0f} / {thresholds['short']:.0f}</b>",
+                f"Независимый поиск при neutral BTC: <b>{'ВКЛЮЧЁН' if thresholds['neutral_mode'] else 'НЕ ТРЕБУЕТСЯ'}</b>",
             ]
         else:
             lines.append("Режим BTC: <b>⚠️ ДАННЫЕ НЕДОСТУПНЫ</b>")
@@ -291,7 +324,7 @@ async def system_status(update, context):
             lines += ["",f"⚠️ Недоступные обязательные компоненты: <b>{', '.join(failures)}</b>.",
                       "Пока они не восстановятся, отсутствие сигнала нельзя считать результатом рынка."]
         lines += ["","До 100 закрытых активированных сигналов результат считается недостаточной выборкой.",
-                  "При нейтральном режиме новые сделки блокируются — бот ждёт устойчивого направления."]
+                  "При исходно нейтральном BTC рынок не блокируется: бот ищет независимые сетапы с повышенным порогом и выдаёт не более одного сигнала за скан. Экстремальное расхождение ширины рынка остаётся защитной блокировкой."]
         text="\n".join(lines)
     except Exception:
         log.exception("system status failed")
