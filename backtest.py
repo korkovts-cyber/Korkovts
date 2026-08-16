@@ -1,0 +1,47 @@
+import asyncio
+import pandas as pd
+from .market import get_klines
+from .strategy import analyze
+from .config import ROUND_TRIP_COST_PCT
+
+async def run(symbol="BTCUSDT",tf="1h"):
+    frames={"15m":("5m","1h","15min"),"1h":("15m","4h","1h"),"4h":("1h","1d","4h")}
+    if tf not in frames: raise ValueError("Поддерживаются таймфреймы: 15m, 1h, 4h")
+    lower_tf,higher_tf,delta=frames[tf]
+    df,lower,higher=await asyncio.gather(get_klines(symbol,tf,450),get_klines(symbol,lower_tf,1500),
+                                         get_klines(symbol,higher_tf,1000))
+    trades=wins=losses=0; returns=[]
+    last_exit=-1
+    for i in range(250,len(df)-25):
+        if i<=last_exit: continue
+        decision_time=df.iloc[i-1].open_time+pd.Timedelta(delta)
+        lo=lower[lower.open_time+pd.Timedelta(lower_tf)<=decision_time]
+        hi=higher[higher.open_time+pd.Timedelta(higher_tf)<=decision_time]
+        s=analyze(symbol,tf.upper(),df.iloc[:i],hi,65,lo,None,None,None)
+        if not s: continue
+        outcome=None; reward=0
+        risk=abs((s.entry_low+s.entry_high)/2-s.stop)
+        cost_r=((s.entry_low+s.entry_high)/2)*(ROUND_TRIP_COST_PCT/100)/risk if risk else 0
+        for j in range(i,min(i+24,len(df))):
+            c=df.iloc[j]
+            # If both levels occur in one candle, count the stop first (conservative).
+            if s.side=="LONG":
+                if float(c.low)<=s.stop: outcome="loss"; reward=-1; break
+                if float(c.high)>=s.tp2: outcome="win"; reward=2; break
+            else:
+                if float(c.high)>=s.stop: outcome="loss"; reward=-1; break
+                if float(c.low)<=s.tp2: outcome="win"; reward=2; break
+        if outcome:
+            trades+=1; last_exit=j; returns.append(reward-cost_r)
+            if outcome=="win": wins+=1
+            else: losses+=1
+    gains=sum(x for x in returns if x>0); losses_r=-sum(x for x in returns if x<0)
+    equity=peak=max_dd=0
+    for value in returns:
+        equity+=value; peak=max(peak,equity); max_dd=max(max_dd,peak-equity)
+    return {"trades":trades,"wins":wins,"losses":losses,"win_rate":wins/trades*100 if trades else 0,
+            "net_r":sum(returns),"profit_factor":gains/losses_r if losses_r else (999 if gains else 0),
+            "max_drawdown_r":max_dd,"cost_pct":ROUND_TRIP_COST_PCT}
+
+if __name__=="__main__":
+    print(asyncio.run(run()))
