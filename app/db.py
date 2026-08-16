@@ -1,5 +1,5 @@
-import os,sqlite3
-from .config import (DATABASE_PATH,STRATEGY_VERSION,DEFAULT_RISK_PCT,MAX_RISK_PCT,
+import json,os,sqlite3
+from .config import (APP_VERSION,DATABASE_PATH,STRATEGY_VERSION,DEFAULT_RISK_PCT,MAX_RISK_PCT,
     DAILY_STOP_R,MAX_OPEN_SIGNALS,ROUND_TRIP_COST_PCT,MAX_PORTFOLIO_RISK_PCT)
 from .risk import conservative_plan
 
@@ -7,12 +7,17 @@ EXTRA_SIGNAL_COLUMNS={
     "closed_at":"TEXT", "result":"TEXT", "exit_price":"REAL", "pnl_r":"REAL",
     "last_checked_at":"TEXT", "max_favorable_r":"REAL DEFAULT 0",
     "max_adverse_r":"REAL DEFAULT 0", "strategy_version":"TEXT DEFAULT 'legacy'",
-    "activated_at":"TEXT", "source_chat_id":"INTEGER"
+    "activated_at":"TEXT", "source_chat_id":"INTEGER", "setup_type":"TEXT",
+    "feature_json":"TEXT", "market_regime":"TEXT", "adl_risk":"TEXT",
+    "cluster_id":"INTEGER", "release_version":"TEXT",
+    "is_shadow":"INTEGER NOT NULL DEFAULT 0", "shadow_reason":"TEXT"
 }
 
 def init():
     os.makedirs(os.path.dirname(DATABASE_PATH) or ".",exist_ok=True)
     with sqlite3.connect(DATABASE_PATH) as c:
+        c.execute("PRAGMA journal_mode=WAL")
+        c.execute("PRAGMA busy_timeout=10000")
         c.execute('''CREATE TABLE IF NOT EXISTS signals(
         id INTEGER PRIMARY KEY, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
         symbol TEXT,timeframe TEXT,side TEXT,score REAL,entry REAL,stop REAL,tp1 REAL,tp2 REAL,tp3 REAL,status TEXT DEFAULT "OPEN")''')
@@ -36,22 +41,37 @@ def init():
             if name not in existing:
                 c.execute(f"ALTER TABLE signals ADD COLUMN {name} {definition}")
 
-def save(s,chat_id=None):
+def save(s,chat_id=None,shadow_reason=None):
+    feature_json=json.dumps(getattr(s,"feature_snapshot",{}) or {},ensure_ascii=False,
+                            separators=(",",":"),default=str)
+    regime=(getattr(s,"market_context",{}) or {}).get("bias")
     with sqlite3.connect(DATABASE_PATH) as c:
-        cur=c.execute("INSERT INTO signals(symbol,timeframe,side,score,entry,stop,tp1,tp2,tp3,last_checked_at,strategy_version,status,source_chat_id) VALUES(?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,?,'SENT',?)",
+        cur=c.execute("""INSERT INTO signals(symbol,timeframe,side,score,entry,stop,tp1,tp2,tp3,
+                      last_checked_at,strategy_version,status,source_chat_id,setup_type,feature_json,
+                      market_regime,adl_risk,cluster_id,release_version,is_shadow,shadow_reason)
+                      VALUES(?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,?,'SENT',?,?,?,?,?,?,?,?,?)""",
                       (s.symbol,s.timeframe,s.side,s.score,s.entry_high if s.side=='LONG' else s.entry_low,
-                       s.stop,s.tp1,s.tp2,s.tp3,STRATEGY_VERSION,int(chat_id) if chat_id is not None else None))
+                       s.stop,s.tp1,s.tp2,s.tp3,STRATEGY_VERSION,int(chat_id) if chat_id is not None else None,
+                       getattr(s,"setup_type",None),feature_json,regime,getattr(s,"adl_risk","unknown"),
+                       int(getattr(s,"cluster_id",0) or 0),APP_VERSION,1 if shadow_reason else 0,
+                       shadow_reason))
         return cur.lastrowid
+
+def save_shadow(s,reason):
+    return save(s,None,str(reason))
 
 def recent(n=10):
     with sqlite3.connect(DATABASE_PATH) as c:
-        return c.execute("SELECT created_at,symbol,timeframe,side,score,status,result,pnl_r FROM signals ORDER BY id DESC LIMIT ?",(n,)).fetchall()
+        return c.execute("""SELECT created_at,symbol,timeframe,side,score,status,result,pnl_r,setup_type
+            FROM signals WHERE COALESCE(is_shadow,0)=0 ORDER BY id DESC LIMIT ?""",(n,)).fetchall()
 
-def open_signals(n=100):
+def open_signals(n=500):
     with sqlite3.connect(DATABASE_PATH) as c:
         c.row_factory=sqlite3.Row
         return [dict(r) for r in c.execute('''SELECT id,created_at,activated_at,last_checked_at,status,symbol,timeframe,side,entry,stop,tp1,tp2,tp3,
-            max_favorable_r,max_adverse_r,source_chat_id FROM signals WHERE status IN ('SENT','WAITING','ACTIVE','OPEN') ORDER BY id LIMIT ?''',(n,))]
+            max_favorable_r,max_adverse_r,source_chat_id,is_shadow,shadow_reason FROM signals
+            WHERE status IN ('SENT','WAITING','ACTIVE','OPEN')
+            ORDER BY COALESCE(is_shadow,0),id LIMIT ?''',(n,))]
 
 def activate_signal(signal_id,activated_at):
     with sqlite3.connect(DATABASE_PATH) as c:
@@ -75,24 +95,29 @@ def quality_stats(days=30):
     with sqlite3.connect(DATABASE_PATH) as c:
         row=c.execute('''SELECT COUNT(*),SUM(result='TP1'),SUM(result='TP2'),SUM(result='TP3'),
             SUM(result='SL'),SUM(result='EXPIRED'),AVG(pnl_r),SUM(pnl_r),AVG(max_adverse_r)
-            FROM signals WHERE status='CLOSED' AND result!='ENTRY_EXPIRED'
+            FROM signals WHERE status='CLOSED' AND COALESCE(is_shadow,0)=0
+            AND result NOT IN ('ENTRY_EXPIRED','INVALIDATED')
             AND created_at>=datetime('now',?)''',(f'-{int(days)} days',)).fetchone()
         by_side=c.execute('''SELECT side,COUNT(*),AVG(pnl_r),SUM(result IN ('TP1','TP2','TP3'))*100.0/COUNT(*)
-            FROM signals WHERE status='CLOSED' AND result!='ENTRY_EXPIRED'
+            FROM signals WHERE status='CLOSED' AND COALESCE(is_shadow,0)=0
+            AND result NOT IN ('ENTRY_EXPIRED','INVALIDATED')
             AND created_at>=datetime('now',?) GROUP BY side''',(f'-{int(days)} days',)).fetchall()
-        open_count=c.execute("SELECT COUNT(*) FROM signals WHERE status IN ('WAITING','ACTIVE','OPEN')").fetchone()[0]
+        open_count=c.execute("""SELECT COUNT(*) FROM signals WHERE status IN ('WAITING','ACTIVE','OPEN')
+            AND COALESCE(is_shadow,0)=0""").fetchone()[0]
     return row,by_side,open_count
 
-def calibration_penalty(symbol,side,timeframe,min_samples=20):
+def calibration_penalty(symbol,side,timeframe,min_samples=100):
     """Only tightens the filter after enough forward results; never loosens it."""
     with sqlite3.connect(DATABASE_PATH) as c:
         row=c.execute('''SELECT COUNT(*),AVG(pnl_r),SUM(result IN ('TP1','TP2','TP3'))*100.0/COUNT(*)
-            FROM signals WHERE status='CLOSED' AND result!='ENTRY_EXPIRED'
+            FROM signals WHERE status='CLOSED' AND COALESCE(is_shadow,0)=0
+            AND result NOT IN ('ENTRY_EXPIRED','INVALIDATED')
             AND strategy_version=? AND symbol=? AND side=? AND timeframe=?''',
             (STRATEGY_VERSION,symbol,side,timeframe)).fetchone()
         if not row or row[0]<min_samples:
             row=c.execute('''SELECT COUNT(*),AVG(pnl_r),SUM(result IN ('TP1','TP2','TP3'))*100.0/COUNT(*)
-                FROM signals WHERE status='CLOSED' AND result!='ENTRY_EXPIRED'
+                FROM signals WHERE status='CLOSED' AND COALESCE(is_shadow,0)=0
+                AND result NOT IN ('ENTRY_EXPIRED','INVALIDATED')
                 AND strategy_version=? AND side=? AND timeframe=?''',
                 (STRATEGY_VERSION,side,timeframe)).fetchone()
     count,avg_r,winrate=row or (0,0,0)
@@ -202,8 +227,10 @@ def reset_paper_account(chat_id,balance):
 def daily_risk_guard():
     with sqlite3.connect(DATABASE_PATH) as c:
         rows=c.execute('''SELECT result,COALESCE(pnl_r,0) FROM signals WHERE status='CLOSED'
-            AND closed_at>=datetime('now','-24 hours') ORDER BY closed_at DESC''').fetchall()
-        opened=c.execute("SELECT COUNT(*) FROM signals WHERE status IN ('WAITING','ACTIVE','OPEN')").fetchone()[0]
+            AND COALESCE(is_shadow,0)=0 AND closed_at>=datetime('now','-24 hours')
+            ORDER BY closed_at DESC''').fetchall()
+        opened=c.execute("""SELECT COUNT(*) FROM signals WHERE status IN ('WAITING','ACTIVE','OPEN')
+            AND COALESCE(is_shadow,0)=0""").fetchone()[0]
     total_r=sum(r[1] for r in rows)
     consecutive_sl=len(rows)>=2 and rows[0][0]=='SL' and rows[1][0]=='SL'
     locked=total_r<=DAILY_STOP_R or consecutive_sl or opened>=MAX_OPEN_SIGNALS
@@ -223,10 +250,115 @@ def subscribers():
     with sqlite3.connect(DATABASE_PATH) as c:
         return [r[0] for r in c.execute("SELECT chat_id FROM subscribers WHERE enabled=1").fetchall()]
 
-def was_sent_recently(symbol,side,hours=6,timeframe=None):
+def was_sent_recently(symbol,side,hours=24,timeframe=None):
     with sqlite3.connect(DATABASE_PATH) as c:
         if timeframe:
             return c.execute('''SELECT 1 FROM signals WHERE symbol=? AND side=? AND timeframe=?
-            AND created_at>=datetime('now',?) LIMIT 1''',(symbol,side,timeframe,f'-{int(hours)} hours')).fetchone() is not None
+            AND COALESCE(is_shadow,0)=0 AND created_at>=datetime('now',?) LIMIT 1''',
+            (symbol,side,timeframe,f'-{int(hours)} hours')).fetchone() is not None
         return c.execute('''SELECT 1 FROM signals WHERE symbol=? AND side=?
-            AND created_at>=datetime('now',?) LIMIT 1''',(symbol,side,f'-{int(hours)} hours')).fetchone() is not None
+            AND COALESCE(is_shadow,0)=0 AND created_at>=datetime('now',?) LIMIT 1''',
+            (symbol,side,f'-{int(hours)} hours')).fetchone() is not None
+
+def was_shadowed_recently(symbol,side,timeframe,reason,hours=24):
+    with sqlite3.connect(DATABASE_PATH) as c:
+        return c.execute('''SELECT 1 FROM signals WHERE symbol=? AND side=? AND timeframe=?
+            AND COALESCE(is_shadow,0)=1 AND shadow_reason=?
+            AND created_at>=datetime('now',?) LIMIT 1''',
+            (symbol,side,timeframe,str(reason),f'-{int(hours)} hours')).fetchone() is not None
+
+def signal_memory_stats():
+    """Counts used to verify that the 24-hour memory survived a restart."""
+    with sqlite3.connect(DATABASE_PATH) as c:
+        total=c.execute("SELECT COUNT(*) FROM signals WHERE COALESCE(is_shadow,0)=0").fetchone()[0]
+        last_24h=c.execute("""SELECT COUNT(*) FROM signals WHERE COALESCE(is_shadow,0)=0
+            AND created_at>=datetime('now','-24 hours')""").fetchone()[0]
+        previous_24h=c.execute("""SELECT COUNT(*) FROM signals
+            WHERE COALESCE(is_shadow,0)=0 AND created_at>=datetime('now','-48 hours')
+            AND created_at<datetime('now','-24 hours')""").fetchone()[0]
+        shadow_24h=c.execute("""SELECT COUNT(*) FROM signals WHERE COALESCE(is_shadow,0)=1
+            AND created_at>=datetime('now','-24 hours')""").fetchone()[0]
+    return {"total":total,"last_24h":last_24h,"previous_24h":previous_24h,"shadow_24h":shadow_24h}
+
+def forward_test_stats():
+    """Frozen-strategy cohort metrics; excludes setups that never became trades."""
+    with sqlite3.connect(DATABASE_PATH) as c:
+        issued=c.execute("""SELECT COUNT(*) FROM signals WHERE strategy_version=?
+            AND COALESCE(is_shadow,0)=0""",(STRATEGY_VERSION,)).fetchone()[0]
+        pending=c.execute("""SELECT COUNT(*) FROM signals WHERE strategy_version=?
+            AND COALESCE(is_shadow,0)=0 AND status IN ('SENT','WAITING','ACTIVE','OPEN')""",
+            (STRATEGY_VERSION,)).fetchone()[0]
+        excluded=c.execute("""SELECT result,COUNT(*) FROM signals WHERE strategy_version=?
+            AND COALESCE(is_shadow,0)=0 AND result IN ('ENTRY_EXPIRED','INVALIDATED')
+            GROUP BY result""",(STRATEGY_VERSION,)).fetchall()
+        rows=c.execute("""SELECT result,pnl_r FROM signals WHERE strategy_version=? AND status='CLOSED'
+            AND COALESCE(is_shadow,0)=0 AND result NOT IN ('ENTRY_EXPIRED','INVALIDATED')
+            ORDER BY closed_at,id""",(STRATEGY_VERSION,)).fetchall()
+    pnl=[float(r[1] or 0) for r in rows]
+    gains=sum(x for x in pnl if x>0); losses=-sum(x for x in pnl if x<0)
+    equity=peak=max_dd=0.0
+    for value in pnl:
+        equity+=value; peak=max(peak,equity); max_dd=max(max_dd,peak-equity)
+    return {"issued":issued,"closed":len(rows),"pending":pending,"wins":sum(1 for x in pnl if x>0),
+            "net_r":sum(pnl),"profit_factor":gains/losses if losses else (999.0 if gains else 0.0),
+            "max_drawdown_r":max_dd,"excluded":dict(excluded)}
+
+def research_stats():
+    """Outcome cohorts for the frozen research release; never alters thresholds."""
+    with sqlite3.connect(DATABASE_PATH) as c:
+        feature_count=c.execute("""SELECT COUNT(*) FROM signals
+            WHERE strategy_version=? AND COALESCE(is_shadow,0)=0
+            AND feature_json IS NOT NULL AND feature_json!='{}'""",
+            (STRATEGY_VERSION,)).fetchone()[0]
+        adl_rows=c.execute("""SELECT COALESCE(adl_risk,'unknown'),COUNT(*) FROM signals
+            WHERE strategy_version=? AND COALESCE(is_shadow,0)=0
+            GROUP BY COALESCE(adl_risk,'unknown')""",
+            (STRATEGY_VERSION,)).fetchall()
+        groups=c.execute("""SELECT timeframe,COALESCE(setup_type,'?'),side,COUNT(*) FROM signals
+            WHERE strategy_version=? AND COALESCE(is_shadow,0)=0
+            GROUP BY timeframe,COALESCE(setup_type,'?'),side
+            ORDER BY timeframe,setup_type,side""",(STRATEGY_VERSION,)).fetchall()
+        cohorts=[]
+        for timeframe,setup,side,issued in groups:
+            outcomes=c.execute("""SELECT pnl_r FROM signals WHERE strategy_version=?
+                AND COALESCE(is_shadow,0)=0 AND timeframe=? AND COALESCE(setup_type,'?')=?
+                AND side=? AND status='CLOSED'
+                AND result NOT IN ('ENTRY_EXPIRED','INVALIDATED') ORDER BY closed_at,id""",
+                (STRATEGY_VERSION,timeframe,setup,side)).fetchall()
+            pnl=[float(row[0] or 0) for row in outcomes]
+            gains=sum(value for value in pnl if value>0); losses=-sum(value for value in pnl if value<0)
+            cohorts.append({"timeframe":timeframe,"setup":setup,"side":side,"issued":issued,
+                            "closed":len(pnl),"net_r":sum(pnl),
+                            "profit_factor":gains/losses if losses else (999.0 if gains else 0.0)})
+        shadow_rows=c.execute("""SELECT shadow_reason,pnl_r,result FROM signals WHERE strategy_version=?
+            AND COALESCE(is_shadow,0)=1 AND status='CLOSED'
+            AND result NOT IN ('ENTRY_EXPIRED','INVALIDATED') ORDER BY closed_at,id""",
+            (STRATEGY_VERSION,)).fetchall()
+        shadow_pending=c.execute("""SELECT COUNT(*) FROM signals WHERE strategy_version=?
+            AND COALESCE(is_shadow,0)=1 AND status IN ('SENT','WAITING','ACTIVE','OPEN')""",
+            (STRATEGY_VERSION,)).fetchone()[0]
+        shadow_reasons=c.execute("""SELECT COALESCE(shadow_reason,'UNKNOWN'),COUNT(*)
+            FROM signals WHERE strategy_version=? AND COALESCE(is_shadow,0)=1
+            GROUP BY COALESCE(shadow_reason,'UNKNOWN') ORDER BY COUNT(*) DESC""",
+            (STRATEGY_VERSION,)).fetchall()
+        shadow_cohorts=[]
+        for reason,issued in shadow_reasons:
+            outcomes=c.execute("""SELECT pnl_r FROM signals WHERE strategy_version=?
+                AND COALESCE(is_shadow,0)=1 AND COALESCE(shadow_reason,'UNKNOWN')=?
+                AND status='CLOSED' AND result NOT IN ('ENTRY_EXPIRED','INVALIDATED')
+                ORDER BY closed_at,id""",(STRATEGY_VERSION,reason)).fetchall()
+            pnl=[float(row[0] or 0) for row in outcomes]
+            gains=sum(value for value in pnl if value>0); losses=-sum(value for value in pnl if value<0)
+            equity=peak=max_dd=0.0
+            for value in pnl:
+                equity+=value; peak=max(peak,equity); max_dd=max(max_dd,peak-equity)
+            shadow_cohorts.append({"reason":reason,"issued":issued,"closed":len(pnl),
+                                   "net_r":sum(pnl),"max_drawdown_r":max_dd,
+                                   "profit_factor":gains/losses if losses else (999.0 if gains else 0.0)})
+    shadow_pnl=[float(row[1] or 0) for row in shadow_rows]
+    shadow_gains=sum(value for value in shadow_pnl if value>0)
+    shadow_losses=-sum(value for value in shadow_pnl if value<0)
+    shadow={"closed":len(shadow_pnl),"pending":shadow_pending,"net_r":sum(shadow_pnl),
+            "profit_factor":shadow_gains/shadow_losses if shadow_losses else (999.0 if shadow_gains else 0.0)}
+    return {"feature_snapshots":feature_count,"adl":dict(adl_rows),"cohorts":cohorts,
+            "shadow":shadow,"shadow_cohorts":shadow_cohorts}

@@ -19,19 +19,28 @@ async def run(symbol="BTCUSDT",tf="1h"):
         hi=higher[higher.open_time+pd.Timedelta(higher_tf)<=decision_time]
         s=analyze(symbol,tf.upper(),df.iloc[:i],hi,65,lo,None,None,None)
         if not s: continue
-        outcome=None; reward=0
-        risk=abs((s.entry_low+s.entry_high)/2-s.stop)
-        cost_r=((s.entry_low+s.entry_high)/2)*(ROUND_TRIP_COST_PCT/100)/risk if risk else 0
+        outcome=None; reward=0; active=False
+        entry=s.entry_high if s.side=="LONG" else s.entry_low
+        risk=abs(entry-s.stop)
+        cost_r=entry*(ROUND_TRIP_COST_PCT/100)/risk if risk else 0
         for j in range(i,min(i+24,len(df))):
             c=df.iloc[j]
-            # If both levels occur in one candle, count the stop first (conservative).
+            entry_hit=float(c.low)<=entry<=float(c.high)
+            invalid_hit=(float(c.low)<=s.stop if s.side=="LONG" else float(c.high)>=s.stop)
+            if not active:
+                if invalid_hit and not entry_hit:
+                    outcome="invalidated"; reward=0; break
+                if not entry_hit:
+                    continue
+                active=True
+            # If entry, stop and target occur in one candle, count the stop first.
             if s.side=="LONG":
                 if float(c.low)<=s.stop: outcome="loss"; reward=-1; break
                 if float(c.high)>=s.tp2: outcome="win"; reward=2; break
             else:
                 if float(c.high)>=s.stop: outcome="loss"; reward=-1; break
                 if float(c.low)<=s.tp2: outcome="win"; reward=2; break
-        if outcome:
+        if outcome in ("win","loss"):
             trades+=1; last_exit=j; returns.append(reward-cost_r)
             if outcome=="win": wins+=1
             else: losses+=1
