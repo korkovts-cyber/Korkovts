@@ -8,6 +8,7 @@ class Signal:
     tp1:float; tp2:float; tp3:float; rr:float; reasons:list
     funding:float=0; open_interest:float=0
     volatility_pct:float=0
+    leverage:int=1; expected_window:str="6–48 часов"
 
 def analyze(symbol,timeframe,df,higher=None,min_score=75,lower=None,market_bias=None,derivatives=None,news=None):
     x=enrich(df)
@@ -15,6 +16,7 @@ def analyze(symbol,timeframe,df,higher=None,min_score=75,lower=None,market_bias=
     h=enrich(higher) if higher is not None and len(higher)>220 else None
     a=x.iloc[-1]; p=x.iloc[-2]; price=float(a.close); vol=float(a.atr)
     L=S=0; lr=[]; sr=[]; htf_long=htf_short=False
+    quality_long=quality_short=0
     if a.ema20>a.ema50>a.ema200: L+=18; lr.append("восходящий тренд EMA 20/50/200")
     if a.ema20<a.ema50<a.ema200: S+=18; sr.append("нисходящий тренд EMA 20/50/200")
     if a.adx>=20 and a.plus_di>a.minus_di: L+=10; lr.append(f"сила тренда ADX {a.adx:.0f}")
@@ -47,14 +49,32 @@ def analyze(symbol,timeframe,df,higher=None,min_score=75,lower=None,market_bias=
     if a.momentum24<=-2 and a.close<a.ema50: S+=3; sr.append(f"импульс 24ч {a.momentum24:+.1f}%")
     if a.close>a.bb_mid and a.bb_width>p.bb_width: L+=3; lr.append("Bollinger расширяется вверх")
     if a.close<a.bb_mid and a.bb_width>p.bb_width: S+=3; sr.append("Bollinger расширяется вниз")
+    cloud_top=max(a.ichimoku_a,a.ichimoku_b); cloud_bottom=min(a.ichimoku_a,a.ichimoku_b)
+    if a.close>cloud_top and a.ichimoku_conversion>a.ichimoku_base:
+        L+=7; quality_long+=1; lr.append("Ichimoku подтверждает восходящую структуру")
+    if a.close<cloud_bottom and a.ichimoku_conversion<a.ichimoku_base:
+        S+=7; quality_short+=1; sr.append("Ichimoku подтверждает нисходящую структуру")
+    if a.supertrend_dir>0:
+        L+=5; quality_long+=1; lr.append("Supertrend направлен вверх")
+    if a.supertrend_dir<0:
+        S+=5; quality_short+=1; sr.append("Supertrend направлен вниз")
+    if a.cmf20>=0.05 and 48<=a.mfi<=80:
+        L+=6; quality_long+=1; lr.append(f"денежный поток CMF/MFI в покупки ({a.cmf20:+.2f}/{a.mfi:.0f})")
+    if a.cmf20<=-0.05 and 20<=a.mfi<=52:
+        S+=6; quality_short+=1; sr.append(f"денежный поток CMF/MFI в продажи ({a.cmf20:+.2f}/{a.mfi:.0f})")
     if h is not None:
         q=h.iloc[-1]
-        if q.ema20>q.ema50 and q.close>q.ema200: L+=15; htf_long=True; lr.append("подтверждение тренда на 4H")
-        if q.ema20<q.ema50 and q.close<q.ema200: S+=15; htf_short=True; sr.append("подтверждение тренда на 4H")
+        higher_label="1H" if timeframe=="15M" else "4H"
+        q_top=max(q.ichimoku_a,q.ichimoku_b); q_bottom=min(q.ichimoku_a,q.ichimoku_b)
+        if q.ema20>q.ema50 and q.close>q.ema200 and q.close>q_top:
+            L+=15; htf_long=True; quality_long+=1; lr.append(f"EMA и Ichimoku подтверждают тренд на {higher_label}")
+        if q.ema20<q.ema50 and q.close<q.ema200 and q.close<q_bottom:
+            S+=15; htf_short=True; quality_short+=1; sr.append(f"EMA и Ichimoku подтверждают тренд на {higher_label}")
     if lower is not None and len(lower)>50:
         z=enrich(lower).iloc[-1]
-        if z.close>z.ema20 and z.macd_hist>0: L+=6; lr.append("точка входа подтверждена на 15m")
-        if z.close<z.ema20 and z.macd_hist<0: S+=6; sr.append("точка входа подтверждена на 15m")
+        lower_label="5m" if timeframe=="15M" else "15m"
+        if z.close>z.ema20 and z.macd_hist>0: L+=6; quality_long+=1; lr.append(f"точка входа подтверждена на {lower_label}")
+        if z.close<z.ema20 and z.macd_hist<0: S+=6; quality_short+=1; sr.append(f"точка входа подтверждена на {lower_label}")
     if market_bias=="LONG": L+=5; lr.append("рынок BTC направлен вверх")
     elif market_bias=="SHORT": S+=5; sr.append("рынок BTC направлен вниз")
     funding=float((derivatives or {}).get("funding",0))
@@ -67,8 +87,8 @@ def analyze(symbol,timeframe,df,higher=None,min_score=75,lower=None,market_bias=
         basis=float(derivatives.get("basis_bps",0))
         if oi_change>=0.8:
             L+=4; S+=4; lr.append(f"open interest растёт на {oi_change:.1f}%"); sr.append(f"open interest растёт на {oi_change:.1f}%")
-        if taker>=1.05: L+=6; micro_long+=1; lr.append(f"taker-покупки преобладают ({taker:.2f})")
-        if taker<=0.95: S+=6; micro_short+=1; sr.append(f"taker-продажи преобладают ({taker:.2f})")
+        if taker>=1.05: L+=6; micro_long+=1; quality_long+=1; lr.append(f"taker-покупки преобладают ({taker:.2f})")
+        if taker<=0.95: S+=6; micro_short+=1; quality_short+=1; sr.append(f"taker-продажи преобладают ({taker:.2f})")
         if book>=0.08: L+=6; micro_long+=1; lr.append(f"дисбаланс стакана в покупки ({book:+.0%})")
         if book<=-0.08: S+=6; micro_short+=1; sr.append(f"дисбаланс стакана в продажи ({book:+.0%})")
         if top>=1.05: L+=4; micro_long+=1; lr.append(f"крупные позиции преимущественно LONG ({top:.2f})")
@@ -89,15 +109,16 @@ def analyze(symbol,timeframe,df,higher=None,min_score=75,lower=None,market_bias=
     support=float(x.low.tail(50).min()); resistance=float(x.high.tail(50).max())
     # A signal must agree with 4H, have a real trend and beat the opposite side clearly.
     deep_ok=not (derivatives or {}).get("deep_data") or micro_long>=2
-    if L>=min_score and L-S>=15 and htf_long and a.adx>=18 and a.rsi<75 and deep_ok and news_score>-0.80:
+    leverage=1 if float(a.atr_pct)>=1.5 else 2
+    if L>=min_score and L-S>=15 and htf_long and quality_long>=3 and a.adx>=18 and a.rsi<75 and deep_ok and news_score>-0.80:
         lo=price-vol*.25; hi=price+vol*.25
         stop=min(price-vol*1.5,support*.995); risk=max(price-stop,vol*.5)
-        return Signal(symbol,timeframe,"LONG",L,lo,hi,stop,price+risk,price+2*risk,price+3*risk,2,lr,funding,oi,float(a.atr_pct))
+        return Signal(symbol,timeframe,"LONG",L,lo,hi,stop,price+risk,price+2*risk,price+3*risk,2,lr,funding,oi,float(a.atr_pct),leverage)
     deep_ok=not (derivatives or {}).get("deep_data") or micro_short>=2
-    if S>=min_score and S-L>=15 and htf_short and a.adx>=18 and a.rsi>25 and deep_ok and news_score<0.80:
+    if S>=min_score and S-L>=15 and htf_short and quality_short>=3 and a.adx>=18 and a.rsi>25 and deep_ok and news_score<0.80:
         lo=price-vol*.25; hi=price+vol*.25
         stop=max(price+vol*1.5,resistance*1.005); risk=max(stop-price,vol*.5)
-        return Signal(symbol,timeframe,"SHORT",S,lo,hi,stop,price-risk,price-2*risk,price-3*risk,2,sr,funding,oi,float(a.atr_pct))
+        return Signal(symbol,timeframe,"SHORT",S,lo,hi,stop,price-risk,price-2*risk,price-3*risk,2,sr,funding,oi,float(a.atr_pct),leverage)
     return None
 
 def fmt(s,priority=False):
@@ -108,6 +129,8 @@ def fmt(s,priority=False):
             f"💎 Сила сигнала: <b>{s.score:.0f}/100</b>\n\n🎯 Зона входа: <b>{s.entry_low:.8g} – {s.entry_high:.8g}</b>\n"
             f"🛑 Стоп-лосс: <b>{s.stop:.8g}</b>\n✅ Цель 1: <b>{s.tp1:.8g}</b>\n✅ Цель 2: <b>{s.tp2:.8g}</b>\n"
             f"✅ Цель 3: <b>{s.tp3:.8g}</b>\n⚖️ Риск/прибыль: <b>1:{s.rr:.1f}</b>\n"
-            f"🧾 Paper-выход: <b>полностью на Цели 2</b>\n"
+            f"⚙️ Максимальное плечо: <b>{s.leverage}×</b>\n"
+            f"🕒 Ожидаемое окно: <b>{s.expected_window}</b>\n"
+            f"🔄 Пересмотр условий: <b>через 4 часа</b>\n"
             f"💰 Funding: <b>{s.funding*100:.4f}%</b>\n\n🔍 <b>Почему:</b>\n• "+"\n• ".join(s.reasons)+
-            "\n\n⚠️ Сигнал не гарантирует прибыль. Соблюдай риск-менеджмент.")
+            "\n\n⚠️ Срок ориентировочный, прибыль не гарантирована. Риск на одну сделку — не более 0,25–0,5% капитала.")

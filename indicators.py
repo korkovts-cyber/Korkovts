@@ -61,4 +61,30 @@ def enrich(df):
     x["taker_imbalance10"]=signed_volume.rolling(10).sum()/x.volume.rolling(10).sum().replace(0,np.nan)
     x["cvd"]=signed_volume.cumsum(); x["cvd_ema20"]=ema(x.cvd,20)
     x["momentum24"]=(x.close/x.close.shift(24)-1)*100
+    # Independent confirmations: price structure, volume-weighted money flow,
+    # and an ATR trailing trend. They are deliberately not EMA derivatives.
+    x["ichimoku_conversion"]=(x.high.rolling(9).max()+x.low.rolling(9).min())/2
+    x["ichimoku_base"]=(x.high.rolling(26).max()+x.low.rolling(26).min())/2
+    x["ichimoku_a"]=(x.ichimoku_conversion+x.ichimoku_base)/2
+    x["ichimoku_b"]=(x.high.rolling(52).max()+x.low.rolling(52).min())/2
+    money_flow=typical*x.volume
+    positive=money_flow.where(typical.diff()>0,0.0).rolling(14).sum()
+    negative=money_flow.where(typical.diff()<0,0.0).rolling(14).sum()
+    x["mfi"]=100-(100/(1+positive/negative.replace(0,np.nan)))
+    multiplier=((x.close-x.low)-(x.high-x.close))/(x.high-x.low).replace(0,np.nan)
+    x["cmf20"]=(multiplier*x.volume).rolling(20).sum()/x.volume.rolling(20).sum().replace(0,np.nan)
+    upper=(x.high+x.low)/2+3*x.atr
+    lower=(x.high+x.low)/2-3*x.atr
+    trend=np.zeros(len(x),dtype=int)
+    trend[0]=1
+    for i in range(1,len(x)):
+        if not np.isfinite(x.atr.iloc[i]):
+            trend[i]=trend[i-1]
+        elif x.close.iloc[i]>upper.iloc[i-1]:
+            trend[i]=1
+        elif x.close.iloc[i]<lower.iloc[i-1]:
+            trend[i]=-1
+        else:
+            trend[i]=trend[i-1]
+    x["supertrend_dir"]=trend
     return x.dropna()
