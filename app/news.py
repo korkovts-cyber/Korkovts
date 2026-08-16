@@ -1,9 +1,13 @@
 import asyncio
 import calendar
+import logging
 import re
 import time
-import httpx
+
 import feedparser
+import httpx
+
+log=logging.getLogger(__name__)
 
 FEEDS=(
     ("https://www.coindesk.com/arc/outboundfeeds/rss/",1.0),
@@ -22,7 +26,7 @@ ASSETS={"BTC":("bitcoin","btc"),"ETH":("ethereum","ether","eth"),"BNB":("bnb","b
         "ADA":("cardano","ada"),"AVAX":("avalanche","avax"),"LINK":("chainlink","link"),
         "DOT":("polkadot","dot"),"SUI":("sui",),"TON":("toncoin","ton")}
 _cache={"at":0,"data":{"global":0.0,"assets":{},"headlines":[],"sources":0,
-                         "event_risk":0.0,"high_impact_count":0}}
+                         "event_risk":0.0,"high_impact_count":0,"failed_sources":0}}
 
 def _headline_score(text):
     t=text.lower()
@@ -49,7 +53,9 @@ async def get_news_sentiment():
             async with httpx.AsyncClient(timeout=12,follow_redirects=True) as c:
                 r=await c.get(url,headers={"User-Agent":"CryptoSignalBot/1.0"}); r.raise_for_status()
                 return [(e,source_weight) for e in feedparser.parse(r.content).entries[:30]]
-        except Exception: return []
+        except Exception as exc:  # noqa: BLE001 - one failed feed must not cancel the others.
+            log.warning("news feed unavailable: %s (%s)",url,exc)
+            return []
     batches=await asyncio.gather(*(fetch(url,weight) for url,weight in FEEDS))
     source_count=sum(1 for batch in batches if batch)
     seen=set(); items=[]
@@ -75,6 +81,7 @@ async def get_news_sentiment():
     event_risk=min(1.0,len(high_impact)/3)
     data={"global":max(-1,min(1,global_score)),"assets":assets,
           "headlines":[t for t,_,_,_,_ in scored[:5]],"sources":source_count,
+          "failed_sources":len(FEEDS)-source_count,
           "event_risk":event_risk,"high_impact_count":len(high_impact),
           "high_impact_headlines":high_impact[:5]}
     _cache.update(at=time.time(),data=data)

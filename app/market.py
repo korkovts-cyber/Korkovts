@@ -2,9 +2,11 @@ import asyncio
 import logging
 import random
 import time
+
 import httpx
 import pandas as pd
-from .config import ADL_MAX_AGE_MINUTES,BINANCE_BASE_URL
+
+from .config import ADL_MAX_AGE_MINUTES, BINANCE_BASE_URL
 
 log=logging.getLogger(__name__)
 _client=None
@@ -150,11 +152,23 @@ async def get_derivatives_snapshot(symbol,adl=None):
         _get("/futures/data/basis",{"pair":symbol,"contractType":"PERPETUAL","period":"1h","limit":25}),
         adl_request,return_exceptions=True)
     data={name:(None if isinstance(value,Exception) else value) for name,value in zip(names,values)}
-    missing=[name for name,value in data.items() if value is None]
     premium=data["premium"] or {}; oi=data["oi"] or {}; oi_hist=data["oi_hist"] or []
     taker=data["taker"] or []; global_ls=data["global_ls"] or []
     top_pos=data["top_pos"] or []; depth=data["depth"] or {}; basis_hist=data["basis_hist"] or []
     adl_map=data["adl"] or {}; adl_row=adl_map.get(symbol,{}) if isinstance(adl_map,dict) else {}
+    available={
+        "premium":isinstance(premium,dict) and bool(premium.get("markPrice"))
+                  and bool(premium.get("indexPrice")),
+        "oi":isinstance(oi,dict) and bool(oi.get("openInterest")),
+        "oi_hist":isinstance(oi_hist,list) and len(oi_hist)>=2,
+        "taker":isinstance(taker,list) and len(taker)>=3,
+        "global_ls":isinstance(global_ls,list) and len(global_ls)>=1,
+        "top_pos":isinstance(top_pos,list) and len(top_pos)>=1,
+        "depth":bool(depth.get("bids")) and bool(depth.get("asks")),
+        "basis_hist":isinstance(basis_hist,list) and len(basis_hist)>=2,
+        "adl":isinstance(adl_row,dict) and str(adl_row.get("risk","unknown")).lower()!="unknown",
+    }
+    missing=[name for name,is_available in available.items() if not is_available]
     oi_values=[float(x.get("sumOpenInterestValue",0)) for x in oi_hist]
     oi_change=((oi_values[-1]/oi_values[0]-1)*100) if len(oi_values)>1 and oi_values[0] else 0
     taker_ratios=[float(x.get("buySellRatio",1)) for x in taker]
@@ -169,8 +183,11 @@ async def get_derivatives_snapshot(symbol,adl=None):
     basis_rates=[float(row.get("basisRate",0) or 0) for row in basis_hist]
     basis_rate=basis_rates[-1] if basis_rates else ((mark-index_price)/index_price if index_price else 0)
     basis_change_24h_bps=(basis_rates[-1]-basis_rates[0])*10000 if len(basis_rates)>1 else 0
-    quality=len(names)-len(missing)
-    core_ok=all(data[name] is not None for name in ("premium","oi_hist","taker","depth","adl"))
+    quality=sum(available.values())
+    # Taker flow, crowding and top-position ratios are mandatory because the
+    # final strategy actively gates on them instead of treating them as telemetry.
+    core_ok=all(available[name] for name in
+                ("premium","oi","oi_hist","taker","global_ls","top_pos","depth","adl"))
     adl_risk=str(adl_row.get("risk","unknown")).lower()
     adl_fresh=bool(adl_row.get("fresh",False))
     return {"funding":float(premium.get("lastFundingRate",0)),"mark_price":mark,
@@ -182,7 +199,7 @@ async def get_derivatives_snapshot(symbol,adl=None):
             "basis_bps":basis_rate*10000,"basis_change_24h_bps":basis_change_24h_bps,
             "adl_risk":adl_risk,"adl_age_minutes":float(adl_row.get("age_minutes",9999)),
             "adl_fresh":adl_fresh,
-            "deep_data":core_ok and quality>=6,"data_quality":quality,"data_quality_total":len(names),
+            "deep_data":core_ok and quality>=8,"data_quality":quality,"data_quality_total":len(names),
             "missing":missing}
 
 async def get_prices(symbols):

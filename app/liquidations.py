@@ -20,6 +20,7 @@ STREAM_URL="wss://fstream.binance.com/market/ws/!forceOrder@arr"
 _events=deque(maxlen=100_000)
 _connected_at=0.0
 _last_message_at=0.0
+_socket_connected=False
 
 
 def _orders(payload):
@@ -62,7 +63,7 @@ def snapshot(symbol,oi_notional=0.0,minutes=LIQUIDATION_WINDOW_MINUTES):
     long_usd=sum(event[3] for event in symbol_rows if event[2]=="LONG")
     short_usd=sum(event[3] for event in symbol_rows if event[2]=="SHORT")
     total=long_usd+short_usd
-    ready=bool(_connected_at and now-_connected_at>=300 and now-_last_message_at<300)
+    ready=bool(_socket_connected and _connected_at and now-_connected_at>=300)
     return {
         "liquidation_stream_ready":ready,
         "liquidation_window_min":int(minutes),
@@ -77,26 +78,32 @@ def snapshot(symbol,oi_notional=0.0,minutes=LIQUIDATION_WINDOW_MINUTES):
 
 def stream_status():
     now=time.time()
-    return {"connected":bool(_connected_at and now-_last_message_at<300),
-            "warm":bool(_connected_at and now-_connected_at>=300),
+    while _events and _events[0][0]<now-3600:
+        _events.popleft()
+    return {"connected":bool(_socket_connected),
+            "warm":bool(_socket_connected and _connected_at and now-_connected_at>=300),
             "events_1h":len(_events),"last_message_age":now-_last_message_at if _last_message_at else None}
 
 
 async def monitor():
-    global _connected_at,_last_message_at
+    global _connected_at,_last_message_at,_socket_connected
     delay=1
     while True:
         try:
             async with websockets.connect(STREAM_URL,ping_interval=20,ping_timeout=20,
                                           close_timeout=10,max_queue=2048) as ws:
-                _connected_at=time.time(); _last_message_at=_connected_at; delay=1
+                _connected_at=time.time(); _last_message_at=_connected_at
+                _socket_connected=True; delay=1
                 log.info("Binance liquidation telemetry connected")
                 async for raw in ws:
                     _last_message_at=time.time()
                     ingest(json.loads(raw),_last_message_at)
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - reconnect on any stream/parser failure.
+            _socket_connected=False
             log.warning("liquidation telemetry disconnected: %s",exc)
             await asyncio.sleep(delay)
             delay=min(60,delay*2)
+        finally:
+            _socket_connected=False

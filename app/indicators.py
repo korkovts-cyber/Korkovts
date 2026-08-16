@@ -1,5 +1,6 @@
 import numpy as np
 
+
 def ema(s,n): return s.ewm(span=n,adjust=False).mean()
 
 def rsi(s,n=14):

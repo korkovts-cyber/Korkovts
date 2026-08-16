@@ -1,6 +1,19 @@
-import json,os,sqlite3
-from .config import (APP_VERSION,DATABASE_PATH,STRATEGY_VERSION,DEFAULT_RISK_PCT,MAX_RISK_PCT,
-    DAILY_STOP_R,MAX_OPEN_SIGNALS,ROUND_TRIP_COST_PCT,MAX_PORTFOLIO_RISK_PCT)
+import json
+import os
+import sqlite3
+from datetime import datetime, timezone
+
+from .config import (
+    APP_VERSION,
+    DAILY_STOP_R,
+    DATABASE_PATH,
+    DEFAULT_RISK_PCT,
+    MAX_OPEN_SIGNALS,
+    MAX_PORTFOLIO_RISK_PCT,
+    MAX_RISK_PCT,
+    ROUND_TRIP_COST_PCT,
+    STRATEGY_VERSION,
+)
 from .risk import conservative_plan
 
 EXTRA_SIGNAL_COLUMNS={
@@ -10,7 +23,8 @@ EXTRA_SIGNAL_COLUMNS={
     "activated_at":"TEXT", "source_chat_id":"INTEGER", "setup_type":"TEXT",
     "feature_json":"TEXT", "market_regime":"TEXT", "adl_risk":"TEXT",
     "cluster_id":"INTEGER", "release_version":"TEXT",
-    "is_shadow":"INTEGER NOT NULL DEFAULT 0", "shadow_reason":"TEXT"
+    "is_shadow":"INTEGER NOT NULL DEFAULT 0", "shadow_reason":"TEXT",
+    "delivery_state":"TEXT NOT NULL DEFAULT 'DELIVERED'", "delivered_at":"TEXT"
 }
 
 def init():
@@ -40,30 +54,116 @@ def init():
         for name,definition in EXTRA_SIGNAL_COLUMNS.items():
             if name not in existing:
                 c.execute(f"ALTER TABLE signals ADD COLUMN {name} {definition}")
+        # Rows from releases before the durable outbox were already delivered.
+        c.execute("""UPDATE signals SET delivery_state='DELIVERED'
+            WHERE delivery_state IS NULL OR delivery_state=''""")
+        c.execute("""UPDATE signals SET delivered_at=COALESCE(delivered_at,created_at)
+            WHERE COALESCE(is_shadow,0)=0 AND delivery_state='DELIVERED'""")
+        c.execute('''CREATE TABLE IF NOT EXISTS signal_deliveries(
+        id INTEGER PRIMARY KEY,signal_id INTEGER NOT NULL,chat_id INTEGER NOT NULL,
+        payload TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP,delivered_at TEXT,
+        attempts INTEGER NOT NULL DEFAULT 0,last_error TEXT,
+        UNIQUE(signal_id,chat_id),FOREIGN KEY(signal_id) REFERENCES signals(id))''')
+        c.execute('''CREATE INDEX IF NOT EXISTS idx_signal_deliveries_pending
+            ON signal_deliveries(delivered_at,created_at)''')
 
-def save(s,chat_id=None,shadow_reason=None):
+def _insert_signal(s,chat_id=None,shadow_reason=None,status="SENT",
+                   delivery_state="DELIVERED",delivered_at=None):
     feature_json=json.dumps(getattr(s,"feature_snapshot",{}) or {},ensure_ascii=False,
                             separators=(",",":"),default=str)
     regime=(getattr(s,"market_context",{}) or {}).get("bias")
     with sqlite3.connect(DATABASE_PATH) as c:
         cur=c.execute("""INSERT INTO signals(symbol,timeframe,side,score,entry,stop,tp1,tp2,tp3,
                       last_checked_at,strategy_version,status,source_chat_id,setup_type,feature_json,
-                      market_regime,adl_risk,cluster_id,release_version,is_shadow,shadow_reason)
-                      VALUES(?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,?,'SENT',?,?,?,?,?,?,?,?,?)""",
+                      market_regime,adl_risk,cluster_id,release_version,is_shadow,shadow_reason,
+                      delivery_state,delivered_at)
+                      VALUES(?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                       (s.symbol,s.timeframe,s.side,s.score,s.entry_high if s.side=='LONG' else s.entry_low,
-                       s.stop,s.tp1,s.tp2,s.tp3,STRATEGY_VERSION,int(chat_id) if chat_id is not None else None,
+                       s.stop,s.tp1,s.tp2,s.tp3,STRATEGY_VERSION,status,
+                       int(chat_id) if chat_id is not None else None,
                        getattr(s,"setup_type",None),feature_json,regime,getattr(s,"adl_risk","unknown"),
                        int(getattr(s,"cluster_id",0) or 0),APP_VERSION,1 if shadow_reason else 0,
-                       shadow_reason))
+                       shadow_reason,delivery_state,delivered_at))
         return cur.lastrowid
 
+def save(s,chat_id=None,shadow_reason=None):
+    delivered_at=datetime.now(timezone.utc).isoformat()
+    return _insert_signal(s,chat_id,shadow_reason,"SENT","DELIVERED",delivered_at)
+
+def save_pending(s):
+    """Persist an automatic signal before sending without marking it delivered."""
+    return _insert_signal(s,status="PENDING_DELIVERY",delivery_state="PENDING")
+
 def save_shadow(s,reason):
-    return save(s,None,str(reason))
+    return _insert_signal(s,None,str(reason),"SENT","SHADOW")
+
+def enqueue_delivery(signal_id,chat_id,payload):
+    with sqlite3.connect(DATABASE_PATH) as c:
+        c.execute('''INSERT OR IGNORE INTO signal_deliveries(signal_id,chat_id,payload)
+            VALUES(?,?,?)''',(int(signal_id),int(chat_id),str(payload)))
+        row=c.execute("SELECT id FROM signal_deliveries WHERE signal_id=? AND chat_id=?",
+                      (int(signal_id),int(chat_id))).fetchone()
+    return int(row[0])
+
+def pending_deliveries(limit=100):
+    """Return recent undelivered notifications for currently enabled chats."""
+    with sqlite3.connect(DATABASE_PATH) as c:
+        return c.execute('''SELECT d.id,d.signal_id,d.chat_id,d.payload,d.attempts,sig.symbol
+            FROM signal_deliveries d
+            JOIN signals sig ON sig.id=d.signal_id
+            JOIN subscribers sub ON sub.chat_id=d.chat_id AND sub.enabled=1
+            WHERE d.delivered_at IS NULL
+            AND sig.created_at>=datetime('now','-24 hours')
+            AND COALESCE(sig.delivery_state,'DELIVERED') IN ('PENDING','DELIVERED')
+            ORDER BY d.id LIMIT ?''',(int(limit),)).fetchall()
+
+def mark_delivery_sent(delivery_id):
+    delivered_at=datetime.now(timezone.utc).isoformat()
+    with sqlite3.connect(DATABASE_PATH) as c:
+        row=c.execute("SELECT signal_id,chat_id FROM signal_deliveries WHERE id=?",
+                      (int(delivery_id),)).fetchone()
+        if not row:
+            return
+        signal_id,chat_id=row
+        c.execute('''UPDATE signal_deliveries SET delivered_at=?,attempts=attempts+1,
+            last_error=NULL WHERE id=? AND delivered_at IS NULL''',(delivered_at,int(delivery_id)))
+        c.execute('''UPDATE signals SET status=CASE WHEN status='PENDING_DELIVERY' THEN 'SENT' ELSE status END,
+            delivery_state='DELIVERED',delivered_at=COALESCE(delivered_at,?),
+            source_chat_id=COALESCE(source_chat_id,?) WHERE id=?''',
+            (delivered_at,int(chat_id),int(signal_id)))
+
+def mark_delivery_failed(delivery_id,error):
+    with sqlite3.connect(DATABASE_PATH) as c:
+        c.execute('''UPDATE signal_deliveries SET attempts=attempts+1,last_error=?
+            WHERE id=? AND delivered_at IS NULL''',(str(error)[:500],int(delivery_id)))
+
+def expire_pending_deliveries(hours=24):
+    with sqlite3.connect(DATABASE_PATH) as c:
+        c.execute('''UPDATE signals SET status='DELIVERY_FAILED',delivery_state='FAILED'
+            WHERE status='PENDING_DELIVERY' AND created_at<datetime('now','-5 minutes')
+            AND NOT EXISTS(SELECT 1 FROM signal_deliveries d WHERE d.signal_id=signals.id)''')
+        c.execute('''UPDATE signal_deliveries SET last_error=COALESCE(last_error,'delivery expired')
+            WHERE delivered_at IS NULL AND created_at<datetime('now',?)''',(f'-{int(hours)} hours',))
+        c.execute('''UPDATE signals SET status='DELIVERY_FAILED',delivery_state='FAILED'
+            WHERE status='PENDING_DELIVERY' AND created_at<datetime('now',?)
+            AND NOT EXISTS(SELECT 1 FROM signal_deliveries d
+                           WHERE d.signal_id=signals.id AND d.delivered_at IS NOT NULL)''',
+            (f'-{int(hours)} hours',))
+
+def delivery_stats():
+    with sqlite3.connect(DATABASE_PATH) as c:
+        pending=c.execute('''SELECT COUNT(*) FROM signal_deliveries
+            WHERE delivered_at IS NULL AND created_at>=datetime('now','-24 hours')''').fetchone()[0]
+        failed=c.execute('''SELECT COUNT(*) FROM signals WHERE delivery_state='FAILED'
+            AND created_at>=datetime('now','-7 days')''').fetchone()[0]
+    return {"pending":pending,"failed_7d":failed}
 
 def recent(n=10):
     with sqlite3.connect(DATABASE_PATH) as c:
         return c.execute("""SELECT created_at,symbol,timeframe,side,score,status,result,pnl_r,setup_type
-            FROM signals WHERE COALESCE(is_shadow,0)=0 ORDER BY id DESC LIMIT ?""",(n,)).fetchall()
+            FROM signals WHERE COALESCE(is_shadow,0)=0
+            AND COALESCE(delivery_state,'DELIVERED')='DELIVERED'
+            ORDER BY id DESC LIMIT ?""",(n,)).fetchall()
 
 def open_signals(n=500):
     with sqlite3.connect(DATABASE_PATH) as c:
@@ -254,10 +354,14 @@ def was_sent_recently(symbol,side,hours=24,timeframe=None):
     with sqlite3.connect(DATABASE_PATH) as c:
         if timeframe:
             return c.execute('''SELECT 1 FROM signals WHERE symbol=? AND side=? AND timeframe=?
-            AND COALESCE(is_shadow,0)=0 AND created_at>=datetime('now',?) LIMIT 1''',
+            AND COALESCE(is_shadow,0)=0
+            AND COALESCE(delivery_state,'DELIVERED') IN ('DELIVERED','PENDING')
+            AND created_at>=datetime('now',?) LIMIT 1''',
             (symbol,side,timeframe,f'-{int(hours)} hours')).fetchone() is not None
         return c.execute('''SELECT 1 FROM signals WHERE symbol=? AND side=?
-            AND COALESCE(is_shadow,0)=0 AND created_at>=datetime('now',?) LIMIT 1''',
+            AND COALESCE(is_shadow,0)=0
+            AND COALESCE(delivery_state,'DELIVERED') IN ('DELIVERED','PENDING')
+            AND created_at>=datetime('now',?) LIMIT 1''',
             (symbol,side,f'-{int(hours)} hours')).fetchone() is not None
 
 def was_shadowed_recently(symbol,side,timeframe,reason,hours=24):
@@ -270,11 +374,15 @@ def was_shadowed_recently(symbol,side,timeframe,reason,hours=24):
 def signal_memory_stats():
     """Counts used to verify that the 24-hour memory survived a restart."""
     with sqlite3.connect(DATABASE_PATH) as c:
-        total=c.execute("SELECT COUNT(*) FROM signals WHERE COALESCE(is_shadow,0)=0").fetchone()[0]
+        total=c.execute("""SELECT COUNT(*) FROM signals WHERE COALESCE(is_shadow,0)=0
+            AND COALESCE(delivery_state,'DELIVERED')='DELIVERED'""").fetchone()[0]
         last_24h=c.execute("""SELECT COUNT(*) FROM signals WHERE COALESCE(is_shadow,0)=0
+            AND COALESCE(delivery_state,'DELIVERED')='DELIVERED'
             AND created_at>=datetime('now','-24 hours')""").fetchone()[0]
         previous_24h=c.execute("""SELECT COUNT(*) FROM signals
-            WHERE COALESCE(is_shadow,0)=0 AND created_at>=datetime('now','-48 hours')
+            WHERE COALESCE(is_shadow,0)=0
+            AND COALESCE(delivery_state,'DELIVERED')='DELIVERED'
+            AND created_at>=datetime('now','-48 hours')
             AND created_at<datetime('now','-24 hours')""").fetchone()[0]
         shadow_24h=c.execute("""SELECT COUNT(*) FROM signals WHERE COALESCE(is_shadow,0)=1
             AND created_at>=datetime('now','-24 hours')""").fetchone()[0]
@@ -284,9 +392,13 @@ def forward_test_stats():
     """Frozen-strategy cohort metrics; excludes setups that never became trades."""
     with sqlite3.connect(DATABASE_PATH) as c:
         issued=c.execute("""SELECT COUNT(*) FROM signals WHERE strategy_version=?
-            AND COALESCE(is_shadow,0)=0""",(STRATEGY_VERSION,)).fetchone()[0]
+            AND COALESCE(is_shadow,0)=0
+            AND COALESCE(delivery_state,'DELIVERED')='DELIVERED'""",
+            (STRATEGY_VERSION,)).fetchone()[0]
         pending=c.execute("""SELECT COUNT(*) FROM signals WHERE strategy_version=?
-            AND COALESCE(is_shadow,0)=0 AND status IN ('SENT','WAITING','ACTIVE','OPEN')""",
+            AND COALESCE(is_shadow,0)=0
+            AND COALESCE(delivery_state,'DELIVERED')='DELIVERED'
+            AND status IN ('SENT','WAITING','ACTIVE','OPEN')""",
             (STRATEGY_VERSION,)).fetchone()[0]
         excluded=c.execute("""SELECT result,COUNT(*) FROM signals WHERE strategy_version=?
             AND COALESCE(is_shadow,0)=0 AND result IN ('ENTRY_EXPIRED','INVALIDATED')
@@ -308,6 +420,7 @@ def research_stats():
     with sqlite3.connect(DATABASE_PATH) as c:
         feature_count=c.execute("""SELECT COUNT(*) FROM signals
             WHERE strategy_version=? AND COALESCE(is_shadow,0)=0
+            AND COALESCE(delivery_state,'DELIVERED')='DELIVERED'
             AND feature_json IS NOT NULL AND feature_json!='{}'""",
             (STRATEGY_VERSION,)).fetchone()[0]
         adl_rows=c.execute("""SELECT COALESCE(adl_risk,'unknown'),COUNT(*) FROM signals
@@ -316,6 +429,7 @@ def research_stats():
             (STRATEGY_VERSION,)).fetchall()
         groups=c.execute("""SELECT timeframe,COALESCE(setup_type,'?'),side,COUNT(*) FROM signals
             WHERE strategy_version=? AND COALESCE(is_shadow,0)=0
+            AND COALESCE(delivery_state,'DELIVERED')='DELIVERED'
             GROUP BY timeframe,COALESCE(setup_type,'?'),side
             ORDER BY timeframe,setup_type,side""",(STRATEGY_VERSION,)).fetchall()
         cohorts=[]

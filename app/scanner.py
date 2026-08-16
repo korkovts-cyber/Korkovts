@@ -1,16 +1,66 @@
 import asyncio
+import copy
 import logging
-from .config import (MAX_SYMBOLS_TO_SCAN,MIN_SIGNAL_SCORE,MIN_24H_QUOTE_VOLUME,
-    SCAN_CONCURRENCY,DEEP_ANALYSIS_LIMIT)
-from .market import get_symbols,get_klines,get_tickers,get_derivatives_snapshot,get_adl_risks
-from .strategy import analyze
-from .news import get_news_sentiment,for_symbol
-from .db import calibration_penalty,save_shadow,was_shadowed_recently
+from datetime import datetime, timezone
+
+from .config import (
+    DEEP_ANALYSIS_LIMIT,
+    MAX_SYMBOLS_TO_SCAN,
+    MIN_24H_QUOTE_VOLUME,
+    MIN_SIGNAL_SCORE,
+    SCAN_CONCURRENCY,
+)
+from .db import calibration_penalty, save_shadow, was_shadowed_recently
 from .liquidations import snapshot as liquidation_snapshot
-from .research import (annotate_correlation_clusters,breadth_is_extreme_against,
-                       market_breadth)
+from .market import (
+    get_adl_risks,
+    get_derivatives_snapshot,
+    get_klines,
+    get_symbols,
+    get_tickers,
+)
+from .news import for_symbol, get_news_sentiment
+from .research import (
+    annotate_correlation_clusters,
+    breadth_is_extreme_against,
+    market_breadth,
+)
+from .strategy import analyze
 
 log=logging.getLogger(__name__)
+_last_scan={"main":{"status":"idle"},"short":{"status":"idle"}}
+
+class ScanUnavailable(RuntimeError):
+    """A mandatory source failed, so an empty result would be misleading."""
+
+def _begin_diagnostics(kind):
+    return {"kind":kind,"status":"running","reason":"","started_at":datetime.now(timezone.utc).isoformat(),
+            "finished_at":None,"liquid":0,"prefiltered":0,"deep_checked":0,"final":0,
+            "technical_rejected":0,"technical_errors":0,"derivatives_incomplete":0,
+            "deep_rejected":0,"deep_errors":0,"news_sources":0,"regime":"UNKNOWN",
+            "threshold":None,"error_examples":[]}
+
+def _bump(diagnostics,key):
+    if diagnostics is not None:
+        diagnostics[key]=int(diagnostics.get(key,0))+1
+
+def _record_error(diagnostics,key,symbol,exc):
+    _bump(diagnostics,key)
+    if diagnostics is not None and len(diagnostics["error_examples"])<5:
+        diagnostics["error_examples"].append(f"{symbol}: {type(exc).__name__}: {exc}")
+    log.warning("%s failed for %s: %s",key,symbol,exc)
+
+def _finish_diagnostics(diagnostics,status,reason=""):
+    diagnostics["status"]=status
+    diagnostics["reason"]=str(reason)
+    diagnostics["finished_at"]=datetime.now(timezone.utc).isoformat()
+    _last_scan[diagnostics["kind"]]=copy.deepcopy(diagnostics)
+
+def scan_status():
+    return copy.deepcopy(_last_scan)
+
+def _too_many_errors(errors,total):
+    return total>0 and (errors>=total or errors/total>0.25)
 
 def _adl_shadow_reason(derivatives):
     risk=str(derivatives.get("adl_risk","unknown")).upper()
@@ -25,7 +75,8 @@ def _store_shadows(rows):
     if stored:
         log.info("stored %s silent shadow candidates",stored)
 
-async def technical_candidate(symbol,market_context=None,semaphore=None,news=None,min_score=MIN_SIGNAL_SCORE):
+async def technical_candidate(symbol,market_context=None,semaphore=None,news=None,
+                              min_score=MIN_SIGNAL_SCORE,diagnostics=None):
     try:
         async with semaphore:
             lower,a,b=await asyncio.gather(get_klines(symbol,"15m",260),get_klines(symbol,"1h",350),
@@ -33,18 +84,23 @@ async def technical_candidate(symbol,market_context=None,semaphore=None,news=Non
         market_bias=(market_context or {}).get("bias")
         preliminary=analyze(symbol,"1H",a,b,max(60,min_score-15),lower,market_bias,None,
                             for_symbol(news or {},symbol),market_context)
-        return (symbol,lower,a,b,preliminary) if preliminary else None
-    except Exception as exc:
-        log.debug("technical prefilter failed for %s: %s",symbol,exc)
+        if preliminary:
+            return symbol,lower,a,b,preliminary
+        _bump(diagnostics,"technical_rejected")
+        return None
+    except Exception as exc:  # noqa: BLE001 - isolate one symbol from the market scan.
+        _record_error(diagnostics,"technical_errors",symbol,exc)
         return None
 
-async def deep_candidate(candidate,market_context,semaphore,news,adl_risks,min_score=MIN_SIGNAL_SCORE):
+async def deep_candidate(candidate,market_context,semaphore,news,adl_risks,
+                         min_score=MIN_SIGNAL_SCORE,diagnostics=None):
     symbol,lower,a,b,preliminary=candidate
     try:
         async with semaphore:
             adl=adl_risks.get(symbol,{"risk":"unknown","fresh":False,"age_minutes":9999})
             d=await asyncio.wait_for(get_derivatives_snapshot(symbol,adl),timeout=18)
         if not d.get("deep_data"):
+            _bump(diagnostics,"derivatives_incomplete")
             log.info("skip %s: incomplete derivatives snapshot (%s/%s; missing %s)",
                      symbol,d.get("data_quality",0),d.get("data_quality_total",9),
                      ",".join(d.get("missing",[])))
@@ -61,12 +117,15 @@ async def deep_candidate(candidate,market_context,semaphore,news,adl_risks,min_s
             shadow=analyze(symbol,"1H",a,b,threshold,lower,market_context.get("bias"),baseline,
                            for_symbol(news,symbol),market_context)
             reason=_adl_shadow_reason(d) if shadow else None
+        if result is None:
+            _bump(diagnostics,"deep_rejected")
         return result,shadow,reason
-    except Exception as exc:
-        log.debug("deep analysis failed for %s: %s",symbol,exc)
+    except Exception as exc:  # noqa: BLE001 - isolate one symbol from the market scan.
+        _record_error(diagnostics,"deep_errors",symbol,exc)
         return None,None,None
 
-async def short_technical_candidate(symbol,market_context=None,semaphore=None,news=None,min_score=MIN_SIGNAL_SCORE):
+async def short_technical_candidate(symbol,market_context=None,semaphore=None,news=None,
+                                    min_score=MIN_SIGNAL_SCORE,diagnostics=None):
     """Fast setup: 5m entry, 15m setup, 1h trend confirmation."""
     try:
         async with semaphore:
@@ -75,18 +134,23 @@ async def short_technical_candidate(symbol,market_context=None,semaphore=None,ne
         market_bias=(market_context or {}).get("bias")
         preliminary=analyze(symbol,"15M",base,higher,max(65,min_score-12),lower,market_bias,None,
                             for_symbol(news or {},symbol),market_context)
-        return (symbol,lower,base,higher,preliminary) if preliminary else None
-    except Exception as exc:
-        log.debug("short technical prefilter failed for %s: %s",symbol,exc)
+        if preliminary:
+            return symbol,lower,base,higher,preliminary
+        _bump(diagnostics,"technical_rejected")
+        return None
+    except Exception as exc:  # noqa: BLE001 - isolate one symbol from the market scan.
+        _record_error(diagnostics,"technical_errors",symbol,exc)
         return None
 
-async def short_deep_candidate(candidate,market_context,semaphore,news,adl_risks,min_score=MIN_SIGNAL_SCORE):
+async def short_deep_candidate(candidate,market_context,semaphore,news,adl_risks,
+                               min_score=MIN_SIGNAL_SCORE,diagnostics=None):
     symbol,lower,base,higher,preliminary=candidate
     try:
         async with semaphore:
             adl=adl_risks.get(symbol,{"risk":"unknown","fresh":False,"age_minutes":9999})
             derivatives=await asyncio.wait_for(get_derivatives_snapshot(symbol,adl),timeout=18)
         if not derivatives.get("deep_data"):
+            _bump(diagnostics,"derivatives_incomplete")
             log.info("skip short %s: incomplete derivatives snapshot (%s/%s)",
                      symbol,derivatives.get("data_quality",0),derivatives.get("data_quality_total",9))
             return None,None,None
@@ -108,9 +172,11 @@ async def short_deep_candidate(candidate,market_context,semaphore,news,adl_risks
             result.expected_window="30 минут–4 часа"
         if shadow:
             shadow.expected_window="30 минут–4 часа"
+        if result is None:
+            _bump(diagnostics,"deep_rejected")
         return result,shadow,reason
-    except Exception as exc:
-        log.debug("short deep analysis failed for %s: %s",symbol,exc)
+    except Exception as exc:  # noqa: BLE001 - isolate one symbol from the market scan.
+        _record_error(diagnostics,"deep_errors",symbol,exc)
         return None,None,None
 
 async def market_state(tickers=None):
@@ -153,86 +219,139 @@ async def market_regime():
     return (await market_state())["bias"]
 
 async def scan():
-    symbols,tickers,news,adl_risks=await asyncio.gather(
-        get_symbols(),get_tickers(),get_news_sentiment(),get_adl_risks())
-    state=await market_state(tickers)
-    bias=state["bias"]
-    if state["btc_bias_raw"]=="NEUTRAL":
-        log.info("main scan skipped: BTC regime is neutral")
-        return []
-    breadth_shadow=bool(state.get("breadth_blocked"))
-    analysis_state=dict(state)
-    if breadth_shadow:
-        analysis_state["bias"]=state["btc_bias_raw"]
-        analysis_state["label"]="теневая проверка экстремальной ширины рынка"
-    min_score=min(92,MIN_SIGNAL_SCORE+(state["base_score_adjustment"] if breadth_shadow
-                                      else state["score_adjustment"]))
-    if int(news.get("sources",0))<1:
-        log.warning("main scan skipped: news-risk sources unavailable")
-        return []
-    symbols=[s for s in symbols if tickers.get(s,{}).get("quote_volume",0)>=MIN_24H_QUOTE_VOLUME]
-    symbols.sort(key=lambda s:tickers[s]["quote_volume"],reverse=True)
-    if MAX_SYMBOLS_TO_SCAN>0: symbols=symbols[:MAX_SYMBOLS_TO_SCAN]
-    semaphore=asyncio.Semaphore(SCAN_CONCURRENCY)
-    scanned=len(symbols)
-    candidates=await asyncio.gather(*(technical_candidate(s,analysis_state,semaphore,news,min_score) for s in symbols))
-    candidates=[x for x in candidates if x]
-    candidates.sort(key=lambda x:x[4].score,reverse=True)
-    if DEEP_ANALYSIS_LIMIT>0:
-        candidates=candidates[:DEEP_ANALYSIS_LIMIT]
-    deep_count=len(candidates)
-    frames={candidate[0]:candidate[2] for candidate in candidates}
-    results=await asyncio.gather(*(deep_candidate(x,analysis_state,semaphore,news,adl_risks,min_score) for x in candidates))
-    live=[row[0] for row in results if row and row[0]]
-    if breadth_shadow:
-        _store_shadows([(signal,"BREADTH_EXTREME") for signal in live])
-        final=[]
-    else:
-        _store_shadows([(row[1],row[2]) for row in results if row and row[1] and row[2]])
-        final=sorted(live,key=lambda x:x.score,reverse=True)
-    annotate_correlation_clusters(final,frames)
-    log.info("main scan: liquid=%s prefiltered=%s final=%s regime=%s threshold=%s",
-             scanned,deep_count,len(final),bias,min_score)
-    return final
+    diagnostics=_begin_diagnostics("main")
+    try:
+        symbols,tickers,news,adl_risks=await asyncio.gather(
+            get_symbols(),get_tickers(),get_news_sentiment(),get_adl_risks())
+        diagnostics["news_sources"]=int(news.get("sources",0))
+        state=await market_state(tickers)
+        bias=state["bias"]
+        diagnostics["regime"]=bias
+        if diagnostics["news_sources"]<1:
+            raise ScanUnavailable("all news-risk sources are unavailable")
+        if state["btc_bias_raw"]=="NEUTRAL":
+            _finish_diagnostics(diagnostics,"blocked","BTC regime is neutral")
+            log.info("main scan skipped: BTC regime is neutral")
+            return []
+        breadth_shadow=bool(state.get("breadth_blocked"))
+        analysis_state=dict(state)
+        if breadth_shadow:
+            analysis_state["bias"]=state["btc_bias_raw"]
+            analysis_state["label"]="теневая проверка экстремальной ширины рынка"
+        min_score=min(92,MIN_SIGNAL_SCORE+(state["base_score_adjustment"] if breadth_shadow
+                                          else state["score_adjustment"]))
+        diagnostics["threshold"]=min_score
+        symbols=[s for s in symbols if tickers.get(s,{}).get("quote_volume",0)>=MIN_24H_QUOTE_VOLUME]
+        symbols.sort(key=lambda s:tickers[s]["quote_volume"],reverse=True)
+        if MAX_SYMBOLS_TO_SCAN>0:
+            symbols=symbols[:MAX_SYMBOLS_TO_SCAN]
+        if not symbols:
+            raise ScanUnavailable("no liquid symbols available from Binance")
+        semaphore=asyncio.Semaphore(SCAN_CONCURRENCY)
+        diagnostics["liquid"]=len(symbols)
+        candidates=await asyncio.gather(*(technical_candidate(
+            s,analysis_state,semaphore,news,min_score,diagnostics) for s in symbols))
+        if _too_many_errors(diagnostics["technical_errors"],len(symbols)):
+            raise ScanUnavailable(
+                f"technical data failed for {diagnostics['technical_errors']}/{len(symbols)} symbols")
+        candidates=sorted([x for x in candidates if x],key=lambda x:x[4].score,reverse=True)
+        diagnostics["prefiltered"]=len(candidates)
+        if DEEP_ANALYSIS_LIMIT>0:
+            candidates=candidates[:DEEP_ANALYSIS_LIMIT]
+        diagnostics["deep_checked"]=len(candidates)
+        frames={candidate[0]:candidate[2] for candidate in candidates}
+        results=await asyncio.gather(*(deep_candidate(
+            x,analysis_state,semaphore,news,adl_risks,min_score,diagnostics) for x in candidates))
+        if diagnostics["deep_checked"] and diagnostics["derivatives_incomplete"]>=diagnostics["deep_checked"]:
+            raise ScanUnavailable("derivatives data incomplete for every deep candidate")
+        if _too_many_errors(diagnostics["deep_errors"],diagnostics["deep_checked"]):
+            raise ScanUnavailable(
+                f"deep analysis failed for {diagnostics['deep_errors']}/{diagnostics['deep_checked']} candidates")
+        live=[row[0] for row in results if row and row[0]]
+        if breadth_shadow:
+            _store_shadows([(signal,"BREADTH_EXTREME") for signal in live])
+            final=[]
+        else:
+            _store_shadows([(row[1],row[2]) for row in results if row and row[1] and row[2]])
+            final=sorted(live,key=lambda x:x.score,reverse=True)
+        annotate_correlation_clusters(final,frames)
+        diagnostics["final"]=len(final)
+        reason="breadth extreme; candidates stored only as shadow" if breadth_shadow else ""
+        _finish_diagnostics(diagnostics,"ok",reason)
+        log.info("main scan: liquid=%s prefiltered=%s deep=%s final=%s regime=%s threshold=%s errors=%s",
+                 diagnostics["liquid"],diagnostics["prefiltered"],diagnostics["deep_checked"],
+                 diagnostics["final"],bias,min_score,
+                 diagnostics["technical_errors"]+diagnostics["deep_errors"])
+        return final
+    except Exception as exc:
+        _finish_diagnostics(diagnostics,"error",exc)
+        raise
 
 async def scan_short():
-    symbols,tickers,news,adl_risks=await asyncio.gather(
-        get_symbols(),get_tickers(),get_news_sentiment(),get_adl_risks())
-    state=await market_state(tickers)
-    bias=state["bias"]
-    if state["btc_bias_raw"]=="NEUTRAL":
-        log.info("short scan skipped: BTC regime is neutral")
-        return []
-    breadth_shadow=bool(state.get("breadth_blocked"))
-    analysis_state=dict(state)
-    if breadth_shadow:
-        analysis_state["bias"]=state["btc_bias_raw"]
-        analysis_state["label"]="теневая проверка экстремальной ширины рынка"
-    min_score=min(94,MIN_SIGNAL_SCORE+(state["base_score_adjustment"] if breadth_shadow
-                                      else state["score_adjustment"]))
-    if int(news.get("sources",0))<1:
-        log.warning("short scan skipped: news-risk sources unavailable")
-        return []
-    symbols=[s for s in symbols if tickers.get(s,{}).get("quote_volume",0)>=max(MIN_24H_QUOTE_VOLUME,30_000_000)]
-    symbols.sort(key=lambda s:tickers[s]["quote_volume"],reverse=True)
-    if MAX_SYMBOLS_TO_SCAN>0:
-        symbols=symbols[:MAX_SYMBOLS_TO_SCAN]
-    semaphore=asyncio.Semaphore(SCAN_CONCURRENCY)
-    candidates=await asyncio.gather(*(short_technical_candidate(s,analysis_state,semaphore,news,min_score) for s in symbols))
-    candidates=sorted([x for x in candidates if x],key=lambda x:x[4].score,reverse=True)
-    if DEEP_ANALYSIS_LIMIT>0:
-        candidates=candidates[:DEEP_ANALYSIS_LIMIT]
-    deep_count=len(candidates)
-    frames={candidate[0]:candidate[3] for candidate in candidates}
-    results=await asyncio.gather(*(short_deep_candidate(x,analysis_state,semaphore,news,adl_risks,min_score) for x in candidates))
-    live=[row[0] for row in results if row and row[0]]
-    if breadth_shadow:
-        _store_shadows([(signal,"BREADTH_EXTREME") for signal in live])
-        final=[]
-    else:
-        _store_shadows([(row[1],row[2]) for row in results if row and row[1] and row[2]])
-        final=sorted(live,key=lambda x:x.score,reverse=True)
-    annotate_correlation_clusters(final,frames)
-    log.info("short scan: liquid=%s prefiltered=%s final=%s regime=%s threshold=%s",
-             len(symbols),deep_count,len(final),bias,min_score+4)
-    return final
+    diagnostics=_begin_diagnostics("short")
+    try:
+        symbols,tickers,news,adl_risks=await asyncio.gather(
+            get_symbols(),get_tickers(),get_news_sentiment(),get_adl_risks())
+        diagnostics["news_sources"]=int(news.get("sources",0))
+        state=await market_state(tickers)
+        bias=state["bias"]
+        diagnostics["regime"]=bias
+        if diagnostics["news_sources"]<1:
+            raise ScanUnavailable("all news-risk sources are unavailable")
+        if state["btc_bias_raw"]=="NEUTRAL":
+            _finish_diagnostics(diagnostics,"blocked","BTC regime is neutral")
+            log.info("short scan skipped: BTC regime is neutral")
+            return []
+        breadth_shadow=bool(state.get("breadth_blocked"))
+        analysis_state=dict(state)
+        if breadth_shadow:
+            analysis_state["bias"]=state["btc_bias_raw"]
+            analysis_state["label"]="теневая проверка экстремальной ширины рынка"
+        min_score=min(94,MIN_SIGNAL_SCORE+(state["base_score_adjustment"] if breadth_shadow
+                                          else state["score_adjustment"]))
+        diagnostics["threshold"]=min_score+4
+        symbols=[s for s in symbols if tickers.get(s,{}).get("quote_volume",0)>=max(MIN_24H_QUOTE_VOLUME,30_000_000)]
+        symbols.sort(key=lambda s:tickers[s]["quote_volume"],reverse=True)
+        if MAX_SYMBOLS_TO_SCAN>0:
+            symbols=symbols[:MAX_SYMBOLS_TO_SCAN]
+        if not symbols:
+            raise ScanUnavailable("no liquid short-term symbols available from Binance")
+        diagnostics["liquid"]=len(symbols)
+        semaphore=asyncio.Semaphore(SCAN_CONCURRENCY)
+        candidates=await asyncio.gather(*(short_technical_candidate(
+            s,analysis_state,semaphore,news,min_score,diagnostics) for s in symbols))
+        if _too_many_errors(diagnostics["technical_errors"],len(symbols)):
+            raise ScanUnavailable(
+                f"technical data failed for {diagnostics['technical_errors']}/{len(symbols)} symbols")
+        candidates=sorted([x for x in candidates if x],key=lambda x:x[4].score,reverse=True)
+        diagnostics["prefiltered"]=len(candidates)
+        if DEEP_ANALYSIS_LIMIT>0:
+            candidates=candidates[:DEEP_ANALYSIS_LIMIT]
+        diagnostics["deep_checked"]=len(candidates)
+        frames={candidate[0]:candidate[3] for candidate in candidates}
+        results=await asyncio.gather(*(short_deep_candidate(
+            x,analysis_state,semaphore,news,adl_risks,min_score,diagnostics) for x in candidates))
+        if diagnostics["deep_checked"] and diagnostics["derivatives_incomplete"]>=diagnostics["deep_checked"]:
+            raise ScanUnavailable("derivatives data incomplete for every deep candidate")
+        if _too_many_errors(diagnostics["deep_errors"],diagnostics["deep_checked"]):
+            raise ScanUnavailable(
+                f"deep analysis failed for {diagnostics['deep_errors']}/{diagnostics['deep_checked']} candidates")
+        live=[row[0] for row in results if row and row[0]]
+        if breadth_shadow:
+            _store_shadows([(signal,"BREADTH_EXTREME") for signal in live])
+            final=[]
+        else:
+            _store_shadows([(row[1],row[2]) for row in results if row and row[1] and row[2]])
+            final=sorted(live,key=lambda x:x.score,reverse=True)
+        annotate_correlation_clusters(final,frames)
+        diagnostics["final"]=len(final)
+        reason="breadth extreme; candidates stored only as shadow" if breadth_shadow else ""
+        _finish_diagnostics(diagnostics,"ok",reason)
+        log.info("short scan: liquid=%s prefiltered=%s deep=%s final=%s regime=%s threshold=%s errors=%s",
+                 diagnostics["liquid"],diagnostics["prefiltered"],diagnostics["deep_checked"],
+                 diagnostics["final"],bias,min_score+4,
+                 diagnostics["technical_errors"]+diagnostics["deep_errors"])
+        return final
+    except Exception as exc:
+        _finish_diagnostics(diagnostics,"error",exc)
+        raise

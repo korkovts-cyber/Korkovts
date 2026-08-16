@@ -1,11 +1,26 @@
 import asyncio
+import logging
+from datetime import timedelta
+
 import pandas as pd
-from .config import SIGNAL_MAX_AGE_HOURS,ENTRY_EXPIRY_HOURS,ROUND_TRIP_COST_PCT
-from .db import open_signals,checkpoint,close_signal,activate_signal
+
+from .config import ENTRY_EXPIRY_HOURS, ROUND_TRIP_COST_PCT, SIGNAL_MAX_AGE_HOURS
+from .db import activate_signal, checkpoint, close_signal, open_signals
 from .market import get_klines_since
+
+log=logging.getLogger(__name__)
 
 def _iso(value):
     return pd.Timestamp(value).isoformat()
+
+def _utc(value):
+    stamp=pd.Timestamp(value)
+    return stamp.tz_localize("UTC") if stamp.tzinfo is None else stamp.tz_convert("UTC")
+
+def _until(df,deadline):
+    if df.empty:
+        return df
+    return df[df.close_time<=deadline]
 
 def _cost_r(row):
     entry=float(row["entry"]); risk=abs(entry-float(row["stop"]))
@@ -30,24 +45,26 @@ def evaluate(row,df):
     return None,mfe,mae
 
 async def update_one(row,semaphore=None,preloaded=None):
-    start=pd.Timestamp(row.get("last_checked_at") or row["created_at"])
-    start=start.tz_localize("UTC") if start.tzinfo is None else start.tz_convert("UTC")
+    start=_utc(row.get("last_checked_at") or row["created_at"])
     if preloaded is None:
         async with semaphore:
             df=await get_klines_since(row["symbol"],"1m",int(start.timestamp()*1000)+1,1500)
     else:
-        boundary=start+pd.Timedelta("1ms")
+        boundary=start+timedelta(milliseconds=1)
         df=preloaded[preloaded.open_time>=boundary] if not preloaded.empty else preloaded
     events=[]
-    created=pd.Timestamp(row["created_at"])
-    created=created.tz_localize("UTC") if created.tzinfo is None else created.tz_convert("UTC")
+    created=_utc(row["created_at"])
     now=pd.Timestamp.now(tz="UTC")
     entry_expiry=1 if row.get("timeframe")=="15M" else ENTRY_EXPIRY_HOURS
     max_age=4 if row.get("timeframe")=="15M" else SIGNAL_MAX_AGE_HOURS
     if row["status"] in ("SENT","WAITING","OPEN"):
-        entry=float(row["entry"]); hit=df[(df.low<=entry)&(df.high>=entry)] if not df.empty else df
-        invalid=(df[df.low<=float(row["stop"])] if row["side"]=="LONG"
-                 else df[df.high>=float(row["stop"])]) if not df.empty else df
+        entry_deadline=created+timedelta(hours=entry_expiry)
+        waiting_df=_until(df,entry_deadline)
+        entry=float(row["entry"])
+        hit=(waiting_df[(waiting_df.low<=entry)&(waiting_df.high>=entry)]
+             if not waiting_df.empty else waiting_df)
+        invalid=(waiting_df[waiting_df.low<=float(row["stop"])] if row["side"]=="LONG"
+                 else waiting_df[waiting_df.high>=float(row["stop"])]) if not waiting_df.empty else waiting_df
         # If the setup is invalidated before price ever reaches the advertised
         # entry, it is not a loss and must never be activated later.
         if not invalid.empty and (hit.empty or invalid.index[0]<hit.index[0]):
@@ -55,33 +72,44 @@ async def update_one(row,semaphore=None,preloaded=None):
             close_signal(row["id"],"INVALIDATED",float(row["stop"]),0,closed_at,0,0)
             return [("CLOSED",row["id"],row["symbol"],"INVALIDATED",row.get("source_chat_id"))]
         if hit.empty:
-            if now-created>=pd.Timedelta(f"{entry_expiry}h"):
-                closed_at=_iso(df.iloc[-1].close_time) if not df.empty else now.isoformat()
+            if now>=entry_deadline:
+                closed_at=entry_deadline.isoformat()
                 close_signal(row["id"],"ENTRY_EXPIRED",entry,0,closed_at,0,0)
                 return [("CLOSED",row["id"],row["symbol"],"ENTRY_EXPIRED",row.get("source_chat_id"))]
-            if not df.empty: checkpoint(row["id"],_iso(df.iloc[-1].close_time),0,0)
+            if not waiting_df.empty:
+                checkpoint(row["id"],_iso(waiting_df.iloc[-1].close_time),0,0)
             return []
-        first_index=hit.index[0]; activated_at=_iso(df.loc[first_index].close_time)
+        first_index=hit.index[0]; activated_at=_iso(waiting_df.loc[first_index].close_time)
         activate_signal(row["id"],activated_at)
         row["status"]="ACTIVE"; row["activated_at"]=activated_at
-        df=df.loc[first_index:]; events.append(("ACTIVE",row["id"],row["symbol"],"ENTRY",row.get("source_chat_id")))
-    outcome,mfe,mae=evaluate(row,df)
+        df=df.loc[first_index:]
+        events.append(("ACTIVE",row["id"],row["symbol"],"ENTRY",row.get("source_chat_id")))
+    activated=_utc(row.get("activated_at") or row["created_at"])
+    trade_deadline=activated+timedelta(hours=max_age)
+    evaluation_df=_until(df,trade_deadline)
+    outcome,mfe,mae=evaluate(row,evaluation_df)
     mfe=max(float(row.get("max_favorable_r") or 0),mfe)
     mae=max(float(row.get("max_adverse_r") or 0),mae)
     if outcome:
         result,price,pnl_r,closed_at=outcome
         close_signal(row["id"],result,price,pnl_r,closed_at,mfe,mae)
         events.append(("CLOSED",row["id"],row["symbol"],result,row.get("source_chat_id"))); return events
-    activated=pd.Timestamp(row.get("activated_at") or row["created_at"])
-    activated=activated.tz_localize("UTC") if activated.tzinfo is None else activated.tz_convert("UTC")
-    if not df.empty and now-activated>=pd.Timedelta(f"{max_age}h"):
-        price=float(df.iloc[-1].close); entry=float(row["entry"]); risk=abs(entry-float(row["stop"]))
+    if now>=trade_deadline:
+        if not evaluation_df.empty:
+            price=float(evaluation_df.iloc[-1].close)
+        elif not df.empty:
+            # The first candle after expiry is only a price proxy; its high/low
+            # must not turn an already expired signal into a win or a loss.
+            price=float(df.iloc[0].open)
+        else:
+            price=float(row["entry"])
+        entry=float(row["entry"]); risk=abs(entry-float(row["stop"]))
         pnl_r=((price-entry) if row["side"]=="LONG" else (entry-price))/risk-_cost_r(row)
-        closed_at=_iso(df.iloc[-1].close_time)
+        closed_at=trade_deadline.isoformat()
         close_signal(row["id"],"EXPIRED",price,pnl_r,closed_at,mfe,mae)
         events.append(("CLOSED",row["id"],row["symbol"],"EXPIRED",row.get("source_chat_id"))); return events
-    if not df.empty:
-        checkpoint(row["id"],_iso(df.iloc[-1].close_time),mfe,mae)
+    if not evaluation_df.empty:
+        checkpoint(row["id"],_iso(evaluation_df.iloc[-1].close_time),mfe,mae)
     return events
 
 async def update_outcomes():
@@ -99,9 +127,25 @@ async def update_outcomes():
         async with semaphore:
             frame=await get_klines_since(symbol,"1m",int(earliest.timestamp()*1000)+1,1500)
         return symbol,frame
-    loaded=await asyncio.gather(*(load(symbol,symbol_rows) for symbol,symbol_rows in grouped.items()),
+    groups=list(grouped.items())
+    loaded=await asyncio.gather(*(load(symbol,symbol_rows) for symbol,symbol_rows in groups),
                                 return_exceptions=True)
-    frames={item[0]:item[1] for item in loaded if isinstance(item,tuple)}
+    frames={}
+    for (symbol,_),item in zip(groups,loaded):
+        if isinstance(item,Exception):
+            log.error("outcome history load failed for %s: %s",symbol,item,
+                      exc_info=(type(item),item,item.__traceback__))
+        else:
+            frames[item[0]]=item[1]
+    tracked=[row for row in rows if row["symbol"] in frames]
     results=await asyncio.gather(*(update_one(row,preloaded=frames[row["symbol"]])
-        for row in rows if row["symbol"] in frames),return_exceptions=True)
-    return [event for batch in results if isinstance(batch,list) for event in batch]
+                                   for row in tracked),return_exceptions=True)
+    events=[]
+    for row,batch in zip(tracked,results):
+        if isinstance(batch,Exception):
+            log.error("outcome evaluation failed for signal=%s symbol=%s: %s",
+                      row["id"],row["symbol"],batch,
+                      exc_info=(type(batch),batch,batch.__traceback__))
+        else:
+            events.extend(batch)
+    return events

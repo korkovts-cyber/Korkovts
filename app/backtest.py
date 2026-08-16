@@ -1,8 +1,18 @@
+"""Technical-only historical baseline.
+
+This module cannot reproduce the live v10 decision because Binance does not
+provide all historical ADL, order-book, crowding and news snapshots here.  The
+authoritative v10 evaluation is the forward cohort stored by ``app.tracker``.
+"""
+
 import asyncio
+
 import pandas as pd
+
+from .config import MIN_SIGNAL_SCORE, ROUND_TRIP_COST_PCT
 from .market import get_klines
 from .strategy import analyze
-from .config import ROUND_TRIP_COST_PCT
+
 
 async def run(symbol="BTCUSDT",tf="1h"):
     frames={"15m":("5m","1h","15min"),"1h":("15m","4h","1h"),"4h":("1h","1d","4h")}
@@ -17,7 +27,7 @@ async def run(symbol="BTCUSDT",tf="1h"):
         decision_time=df.iloc[i-1].open_time+pd.Timedelta(delta)
         lo=lower[lower.open_time+pd.Timedelta(lower_tf)<=decision_time]
         hi=higher[higher.open_time+pd.Timedelta(higher_tf)<=decision_time]
-        s=analyze(symbol,tf.upper(),df.iloc[:i],hi,65,lo,None,None,None)
+        s=analyze(symbol,tf.upper(),df.iloc[:i],hi,MIN_SIGNAL_SCORE,lo,None,None,None)
         if not s: continue
         outcome=None; reward=0; active=False
         entry=s.entry_high if s.side=="LONG" else s.entry_low
@@ -48,9 +58,11 @@ async def run(symbol="BTCUSDT",tf="1h"):
     equity=peak=max_dd=0
     for value in returns:
         equity+=value; peak=max(peak,equity); max_dd=max(max_dd,peak-equity)
-    return {"trades":trades,"wins":wins,"losses":losses,"win_rate":wins/trades*100 if trades else 0,
+    return {"scope":"technical_baseline_not_live_v10",
+            "trades":trades,"wins":wins,"losses":losses,"win_rate":wins/trades*100 if trades else 0,
             "net_r":sum(returns),"profit_factor":gains/losses_r if losses_r else (999 if gains else 0),
             "max_drawdown_r":max_dd,"cost_pct":ROUND_TRIP_COST_PCT}
 
 if __name__=="__main__":
+    print("WARNING: technical baseline only; this is not a v10 performance test")
     print(asyncio.run(run()))

@@ -1,7 +1,9 @@
-from dataclasses import dataclass,field
 import math
-from .indicators import enrich
+from dataclasses import dataclass, field
+
 from .config import ROUND_TRIP_COST_PCT
+from .indicators import enrich
+
 
 def _strength_score(raw):
     """Monotonic 0–100 display index; not a probability of winning."""

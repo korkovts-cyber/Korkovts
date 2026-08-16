@@ -2,8 +2,12 @@
 
 import statistics
 
-from .config import (BREADTH_EXTREME_HIGH,BREADTH_EXTREME_LOW,
-                     CORRELATION_CLUSTER_THRESHOLD,MIN_24H_QUOTE_VOLUME)
+from .config import (
+    BREADTH_EXTREME_HIGH,
+    BREADTH_EXTREME_LOW,
+    CORRELATION_CLUSTER_THRESHOLD,
+    MIN_24H_QUOTE_VOLUME,
+)
 
 
 def market_breadth(tickers,min_quote_volume=MIN_24H_QUOTE_VOLUME):

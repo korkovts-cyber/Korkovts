@@ -2,27 +2,60 @@ import asyncio
 import contextlib
 import logging
 from datetime import datetime, timezone
+from html import escape
 
 from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler
 
-from .config import (APP_VERSION, AUTO_SCAN_INTERVAL_MIN, MIN_SIGNAL_SCORE,
-                     SIGNAL_COOLDOWN_HOURS, STRATEGY_VERSION, TELEGRAM_BOT_TOKEN, TOP_COINS)
-from .db import (forward_test_stats, init, recent, research_stats, save,
-                 signal_memory_stats, subscribe, subscribers, was_sent_recently)
-from .market import (get_adl_risks, get_derivatives_snapshot, get_klines,
-                     get_prices, get_tickers, kline_cache_status, close_http_client)
-from .scanner import market_state, scan, scan_short
+from .config import (
+    APP_VERSION,
+    AUTO_SCAN_INTERVAL_MIN,
+    DATABASE_PATH,
+    MIN_SIGNAL_SCORE,
+    SIGNAL_COOLDOWN_HOURS,
+    STRATEGY_VERSION,
+    TELEGRAM_BOT_TOKEN,
+    TOP_COINS,
+)
+from .db import (
+    delivery_stats,
+    enqueue_delivery,
+    expire_pending_deliveries,
+    forward_test_stats,
+    init,
+    mark_delivery_failed,
+    mark_delivery_sent,
+    pending_deliveries,
+    recent,
+    research_stats,
+    save,
+    save_pending,
+    signal_memory_stats,
+    subscribe,
+    subscribers,
+    was_sent_recently,
+)
+from .liquidations import monitor as monitor_liquidations
+from .liquidations import snapshot as liquidation_snapshot
+from .liquidations import stream_status as liquidation_stream_status
+from .market import (
+    close_http_client,
+    get_adl_risks,
+    get_derivatives_snapshot,
+    get_klines,
+    get_prices,
+    get_tickers,
+    kline_cache_status,
+)
+from .scanner import market_state, scan, scan_short, scan_status
 from .strategy import analyze, fmt
 from .tracker import update_outcomes
-from .liquidations import (monitor as monitor_liquidations,
-                           snapshot as liquidation_snapshot,
-                           stream_status as liquidation_stream_status)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger(__name__)
 _scan_lock = asyncio.Lock()
+_delivery_lock = asyncio.Lock()
 _liquidation_task = None
 
 
@@ -49,14 +82,14 @@ def menu(analyze_symbol=None):
 async def start(update, context):
     subscribe(update.effective_chat.id, True)
     text = (
-        "⚡ <b>KORKOVTS SIGNAL AI · V10 RESEARCH</b>\n━━━━━━━━━━━━━━━━━━\n"
+        f"⚡ <b>KORKOVTS SIGNAL AI · V{APP_VERSION} RESEARCH</b>\n━━━━━━━━━━━━━━━━━━\n"
         "📡 Весь рынок Binance Futures USDT-M\n"
         "🧠 Многофакторный анализ 15m · 1H · 4H\n"
         "🧯 ADL-риск Binance · ширина рынка · кластеры корреляции\n"
         f"⏱ Автоскан каждые {AUTO_SCAN_INTERVAL_MIN} минут — уведомления только о новых сигналах\n\n"
         f"🧠 Повтор {SIGNAL_COOLDOWN_HOURS}ч блокируется по монете, направлению и таймфрейму\n"
         "Бот показывает <b>все найденные сильные сигналы</b>, а лучший ставит первым. "
-        "Если условий для входа нет — бот честно сообщает об этом.\n\n"
+        "При ручном скане бот сообщает, если условий нет; авто-режим в этом случае молчит.\n\n"
         "⚠️ Это исследовательский инструмент, а не гарантия прибыли. "
         "Не увеличивай ставку после убытка и не торгуй заёмными деньгами."
     )
@@ -86,9 +119,9 @@ async def signal(update, context):
     try:
         result = await _analyze_symbol(symbol)
         if result:
+            await msg.reply_text(fmt(result, True), parse_mode=ParseMode.HTML, reply_markup=menu(symbol))
             if not was_sent_recently(result.symbol, result.side, SIGNAL_COOLDOWN_HOURS, result.timeframe):
                 save(result, update.effective_chat.id)
-            await msg.reply_text(fmt(result, True), parse_mode=ParseMode.HTML, reply_markup=menu(symbol))
         else:
             await msg.reply_text(
                 f"⚪ <b>{symbol}</b>: сейчас нет достаточно сильного подтверждённого входа.\n"
@@ -103,6 +136,8 @@ async def _send_results(bot, chat_id, results, automatic=False, short=False):
     label = "КОРОТКИЕ СДЕЛКИ" if short else ("АВТОСКАН" if automatic else "СКАН РЫНКА")
     stamp = datetime.now(timezone.utc).strftime("%H:%M UTC")
     if not results:
+        if automatic:
+            return None
         return await bot.send_message(
             chat_id,
             f"📡 <b>{label} ЗАВЕРШЁН</b> · {stamp}\n━━━━━━━━━━━━━━━━━━\n"
@@ -132,10 +167,10 @@ async def scan_cmd(update, context):
     try:
         async with _scan_lock:
             results = await scan()
+        await _send_results(context.bot, update.effective_chat.id, results)
         for result in results:
             if not was_sent_recently(result.symbol, result.side, SIGNAL_COOLDOWN_HOURS, result.timeframe):
                 save(result, update.effective_chat.id)
-        await _send_results(context.bot, update.effective_chat.id, results)
     except Exception:
         log.exception("manual market scan failed")
         await msg.reply_text("⚠️ Скан временно не выполнен: один из источников рынка недоступен.", reply_markup=menu())
@@ -149,10 +184,10 @@ async def short_scan_cmd(update, context):
     try:
         async with _scan_lock:
             results = await scan_short()
+        await _send_results(context.bot, update.effective_chat.id, results, short=True)
         for result in results:
             if not was_sent_recently(result.symbol, result.side, SIGNAL_COOLDOWN_HOURS, result.timeframe):
                 save(result, update.effective_chat.id)
-        await _send_results(context.bot, update.effective_chat.id, results, short=True)
     except Exception:
         log.exception("short-term market scan failed")
         await msg.reply_text("⚠️ Краткосрочный скан временно не выполнен.", reply_markup=menu())
@@ -192,38 +227,75 @@ async def memory(update, context):
 async def system_status(update, context):
     try:
         from .news import get_news_sentiment
-        state,news,adl=await asyncio.gather(market_state(),get_news_sentiment(),get_adl_risks("BTCUSDT"))
-        stats=signal_memory_stats(); test=forward_test_stats()
-        liq=liquidation_stream_status(); breadth=state.get("breadth",{})
-        cache=kline_cache_status()
+        state_result,news_result,adl_result=await asyncio.gather(
+            market_state(),get_news_sentiment(),get_adl_risks("BTCUSDT"),
+            return_exceptions=True)
+        failures=[]
+        state=None if isinstance(state_result,Exception) else state_result
+        news={} if isinstance(news_result,Exception) else news_result
+        adl={} if isinstance(adl_result,Exception) else adl_result
+        if isinstance(state_result,Exception): failures.append("рынок Binance")
+        if isinstance(news_result,Exception) or int(news.get("sources",0))<1: failures.append("новости")
+        if isinstance(adl_result,Exception) or not adl.get("BTCUSDT"): failures.append("ADL")
+
+        stats=signal_memory_stats(); test=forward_test_stats(); deliveries=delivery_stats()
+        liq=liquidation_stream_status(); cache=kline_cache_status()
         btc_adl=adl.get("BTCUSDT",{})
         names={"LONG":"🟢 ВОСХОДЯЩИЙ","SHORT":"🔴 НИСХОДЯЩИЙ","NEUTRAL":"⚪ НЕЙТРАЛЬНЫЙ"}
-        threshold=min(94,MIN_SIGNAL_SCORE+state["score_adjustment"])
         pf="∞" if test['profit_factor']>=999 else f"{test['profit_factor']:.2f}"
-        text=(f"🛡 <b>KORKOVTS V{APP_VERSION}</b>\n━━━━━━━━━━━━━━━━━━\n"
-              f"Когорта стратегии: <b>{STRATEGY_VERSION}</b>\n"
-              f"Режим BTC: <b>{names.get(state['bias'],state['bias'])}</b>\n"
-              f"Состояние: <b>{state['label']}</b>\n"
-              f"ATR BTC 1H: <b>{state['btc_atr_pct']:.2f}%</b>\n"
-              f"Ширина рынка: <b>{float(breadth.get('up_ratio',.5))*100:.0f}% растут</b> · медиана <b>{float(breadth.get('median_change',0)):+.2f}%</b>\n"
-              f"Текущий порог: <b>{threshold:.0f}/100</b>\n"
-              f"ADL-риск BTC: <b>{str(btc_adl.get('risk','unknown')).upper()}</b>\n"
-              f"Поток ликвидаций: <b>{'ПРОГРЕТ' if liq.get('warm') and liq.get('connected') else 'ПРОГРЕВ / НЕТ ДАННЫХ'}</b>\n"
-              f"Новостные источники: <b>{news.get('sources',0)}/3</b>\n"
-              f"Событийный риск: <b>{'ПОВЫШЕННЫЙ' if float(news.get('event_risk',0))>=.67 else 'НОРМАЛЬНЫЙ'}</b>"
-              f" · важных заголовков: <b>{int(news.get('high_impact_count',0))}</b>\n"
-              f"Кэш закрытых свечей: <b>{cache['fresh']} актуальных наборов</b>\n"
-              f"Автоскан: <b>каждые {AUTO_SCAN_INTERVAL_MIN} мин</b>\n"
-              f"Память 24ч: <b>{stats['last_24h']} сигналов</b>\n\n"
-              f"🧪 Закрыто в тесте v{APP_VERSION}: <b>{test['closed']}/100</b>\n"
-              f"Чистый результат: <b>{test['net_r']:+.2f}R</b>\n"
-              f"Profit factor: <b>{pf}</b>\n"
-              f"Макс. просадка: <b>{test['max_drawdown_r']:.2f}R</b>\n\n"
-              "До 100 закрытых активированных сигналов результат считается недостаточной выборкой.\n"
-              "При нейтральном режиме новые сделки блокируются — бот ждёт устойчивого направления.")
+        lines=[f"🛡 <b>KORKOVTS V{APP_VERSION}</b>","━━━━━━━━━━━━━━━━━━",
+               f"Когорта стратегии: <b>{STRATEGY_VERSION}</b>"]
+        if state:
+            breadth=state.get("breadth",{})
+            threshold=min(94,MIN_SIGNAL_SCORE+state["score_adjustment"])
+            lines += [
+                f"Режим BTC: <b>{names.get(state['bias'],state['bias'])}</b>",
+                f"Состояние: <b>{state['label']}</b>",
+                f"ATR BTC 1H: <b>{state['btc_atr_pct']:.2f}%</b>",
+                f"Ширина рынка: <b>{float(breadth.get('up_ratio',.5))*100:.0f}% растут</b> · медиана <b>{float(breadth.get('median_change',0)):+.2f}%</b>",
+                f"Внутренний порог raw-score: <b>{threshold:.0f}</b>",
+            ]
+        else:
+            lines.append("Режим BTC: <b>⚠️ ДАННЫЕ НЕДОСТУПНЫ</b>")
+        lines += [
+            f"ADL-риск BTC: <b>{str(btc_adl.get('risk','недоступен')).upper()}</b>",
+            f"Поток ликвидаций: <b>{'ПРОГРЕТ / ПОДКЛЮЧЁН' if liq.get('warm') and liq.get('connected') else ('ПОДКЛЮЧЁН / ПРОГРЕВ' if liq.get('connected') else 'ОТКЛЮЧЁН')}</b>",
+            f"Новостные источники: <b>{news.get('sources',0)}/3</b>",
+            f"Событийный риск: <b>{'ПОВЫШЕННЫЙ' if float(news.get('event_risk',0))>=.67 else 'НОРМАЛЬНЫЙ'}</b> · важных заголовков: <b>{int(news.get('high_impact_count',0))}</b>",
+            f"Кэш закрытых свечей: <b>{cache['fresh']} актуальных наборов</b>",
+            f"Автоскан: <b>каждые {AUTO_SCAN_INTERVAL_MIN} мин · 1H и 15M по очереди</b>",
+            f"Очередь доставки: <b>{deliveries['pending']}</b> · ошибок за 7 дней: <b>{deliveries['failed_7d']}</b>",
+            f"Память 24ч: <b>{stats['last_24h']} доставленных сигналов</b>",
+            f"Хранилище памяти: <b>{'VOLUME /data' if DATABASE_PATH.startswith('/data/') else 'ЛОКАЛЬНО / МОЖЕТ СБРОСИТЬСЯ'}</b>",
+        ]
+        status_names={"idle":"ЕЩЁ НЕ ЗАПУСКАЛСЯ","running":"ВЫПОЛНЯЕТСЯ","ok":"OK",
+                      "blocked":"ЗАБЛОКИРОВАН РЕЖИМОМ","error":"ОШИБКА"}
+        all_scans=scan_status()
+        for key,label in (("main","1H"),("short","15M")):
+            last=all_scans.get(key,{"status":"idle"})
+            lines += ["",f"📊 Последний скан {label}: <b>{status_names.get(last.get('status'),last.get('status'))}</b>"]
+            if last.get("reason"):
+                lines.append(f"Причина: <b>{escape(str(last['reason']))}</b>")
+            if last.get("status") not in (None,"idle"):
+                scan_errors=int(last.get("technical_errors",0))+int(last.get("deep_errors",0))
+                lines += [
+                    f"Воронка: <b>{last.get('liquid',0)} ликвидных → {last.get('prefiltered',0)} кандидатов → {last.get('final',0)} сигналов</b>",
+                    f"Отсев тех./финал: <b>{last.get('technical_rejected',0)}/{last.get('deep_rejected',0)}</b> · неполные деривативы: <b>{last.get('derivatives_incomplete',0)}</b>",
+                    f"Ошибки отдельных монет: <b>{scan_errors}</b>",
+                ]
+        lines += ["",f"🧪 Закрыто в тесте v{APP_VERSION}: <b>{test['closed']}/100</b>",
+                  f"Чистый результат: <b>{test['net_r']:+.2f}R</b>",
+                  f"Profit factor: <b>{pf}</b>",
+                  f"Макс. просадка: <b>{test['max_drawdown_r']:.2f}R</b>"]
+        if failures:
+            lines += ["",f"⚠️ Недоступные обязательные компоненты: <b>{', '.join(failures)}</b>.",
+                      "Пока они не восстановятся, отсутствие сигнала нельзя считать результатом рынка."]
+        lines += ["","До 100 закрытых активированных сигналов результат считается недостаточной выборкой.",
+                  "При нейтральном режиме новые сделки блокируются — бот ждёт устойчивого направления."]
+        text="\n".join(lines)
     except Exception:
         log.exception("system status failed")
-        text="⚠️ Не удалось подтвердить состояние Binance. Новые сигналы лучше не использовать до восстановления данных."
+        text="⚠️ Не удалось сформировать системный отчёт. Проверь логи Railway перед использованием сигналов."
     await update.effective_message.reply_text(text,parse_mode=ParseMode.HTML,reply_markup=menu())
 
 
@@ -231,7 +303,7 @@ async def lab_status(update, context):
     data=research_stats(); test=forward_test_stats()
     shadow=data["shadow"]
     shadow_pf="∞" if shadow["profit_factor"]>=999 else f"{shadow['profit_factor']:.2f}"
-    lines=["🧪 <b>ЛАБОРАТОРИЯ V10 RESEARCH</b>","━━━━━━━━━━━━━━━━━━",
+    lines=[f"🧪 <b>ЛАБОРАТОРИЯ V{APP_VERSION} RESEARCH</b>","━━━━━━━━━━━━━━━━━━",
            f"Снимков факторов: <b>{data['feature_snapshots']}</b>",
            f"Закрыто активированных: <b>{test['closed']}/100</b>",
            f"Чистый результат: <b>{test['net_r']:+.2f}R</b>",
@@ -250,8 +322,9 @@ async def lab_status(update, context):
             pf="∞" if row["profit_factor"]>=999 else f"{row['profit_factor']:.2f}"
             lines.append(f"• {row['reason']} — {row['closed']}/{row['issued']} · "
                          f"{row['net_r']:+.2f}R · PF {pf} · DD {row['max_drawdown_r']:.2f}R")
-    lines += ["","Ликвидации пока записываются как телеметрия и не угадывают направление. "
-              "Правило можно повысить до фильтра только после отдельной проверки на будущих данных."]
+    lines += ["",(
+        "Ликвидации пока записываются как телеметрия и не угадывают направление. "
+        "Правило можно повысить до фильтра только после отдельной проверки на будущих данных.")]
     await update.effective_message.reply_text("\n".join(lines),parse_mode=ParseMode.HTML,reply_markup=menu())
 
 
@@ -295,34 +368,73 @@ async def clear_chat(update, context):
         try:
             await context.bot.delete_message(chat_id, message_id)
             deleted += 1
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001 - Telegram can raise several API errors here.
+            log.debug("chat cleanup skipped message %s: %s",message_id,exc)
     await context.bot.send_message(chat_id, f"🧹 Очищено сообщений: {deleted}", reply_markup=menu())
 
 
-async def auto_scan(context):
-    chats = subscribers()
-    if not chats:
-        return
-    if _scan_lock.locked():
-        log.info("automatic scan skipped: another scan is running")
-        return
+async def _deliver_pending(bot):
+    """Deliver the durable outbox with at-least-once semantics."""
+    async with _delivery_lock:
+        expire_pending_deliveries(SIGNAL_COOLDOWN_HOURS)
+        delivered=0
+        for delivery_id,signal_id,chat_id,payload,attempts,symbol in pending_deliveries(100):
+            try:
+                await bot.send_message(
+                    chat_id,payload,parse_mode=ParseMode.HTML,reply_markup=menu(symbol))
+            except Exception as exc:
+                mark_delivery_failed(delivery_id,exc)
+                log.exception(
+                    "signal delivery failed: signal=%s chat=%s attempt=%s",
+                    signal_id,chat_id,attempts+1)
+            else:
+                mark_delivery_sent(delivery_id)
+                delivered+=1
+        return delivered
+
+
+async def retry_signal_deliveries(context):
+    """Retry Telegram failures independently from the ten-minute market scan."""
     try:
+        delivered=await _deliver_pending(context.bot)
+        if delivered:
+            log.info("retried signal deliveries: delivered=%s",delivered)
+    except Exception:
+        log.exception("signal outbox retry failed")
+
+
+async def _run_automatic_scan(context,scanner,label):
+    try:
+        chats=subscribers()
+        if not chats:
+            return
+        if _scan_lock.locked():
+            log.info("automatic %s scan skipped: another scan is running",label)
+            return
         async with _scan_lock:
-            all_results = await scan()
+            all_results = await scanner()
         fresh = [r for r in all_results if not was_sent_recently(r.symbol, r.side, SIGNAL_COOLDOWN_HOURS, r.timeframe)]
         if not fresh:
-            log.info("automatic scan completed: no new signals")
+            log.info("automatic %s scan completed: no new signals",label)
             return
-        for result in fresh:
-            save(result)
-        for chat_id in chats:
-            try:
-                await _send_results(context.bot, chat_id, fresh, automatic=True)
-            except Exception:
-                log.exception("automatic report delivery failed for chat %s", chat_id)
+        for index,result in enumerate(fresh):
+            signal_id=save_pending(result)
+            payload=fmt(result,index==0)
+            for chat_id in chats:
+                enqueue_delivery(signal_id,chat_id,payload)
+        delivered=await _deliver_pending(context.bot)
+        log.info("automatic %s signals queued=%s delivered=%s",
+                 label,len(fresh)*len(chats),delivered)
     except Exception:
-        log.exception("automatic scan failed")
+        log.exception("automatic %s scan failed",label)
+
+
+async def auto_scan(context):
+    await _run_automatic_scan(context,scan,"1H")
+
+
+async def auto_short_scan(context):
+    await _run_automatic_scan(context,scan_short,"15M")
 
 
 async def track_signal_outcomes(context):
@@ -357,6 +469,9 @@ async def callback(update, context):
 
 async def post_init(application):
     global _liquidation_task
+    identity=await application.bot.get_me()
+    log.info("Korkovts Signal AI V%s started via app.bot as @%s",
+             APP_VERSION,identity.username or identity.id)
     await application.bot.set_my_commands([
         BotCommand("start", "главное меню"), BotCommand("scan", "сканировать весь рынок"),
         BotCommand("short", "краткосрочные сделки"),
@@ -394,7 +509,12 @@ def main():
     ]:
         application.add_handler(CommandHandler(command, handler))
     application.add_handler(CallbackQueryHandler(callback))
+    application.job_queue.run_repeating(retry_signal_deliveries, interval=60, first=15,
+                                        name="signal-delivery-outbox")
     application.job_queue.run_repeating(auto_scan, interval=AUTO_SCAN_INTERVAL_MIN * 60, first=30, name="market-auto-scan")
+    application.job_queue.run_repeating(
+        auto_short_scan,interval=AUTO_SCAN_INTERVAL_MIN*60,
+        first=max(60,AUTO_SCAN_INTERVAL_MIN*30+30),name="short-market-auto-scan")
     application.job_queue.run_repeating(track_signal_outcomes, interval=120, first=90, name="signal-quality-journal")
     application.run_polling(drop_pending_updates=False)
 
