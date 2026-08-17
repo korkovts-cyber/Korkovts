@@ -7,7 +7,7 @@ TELEGRAM_BOT_TOKEN=os.getenv("TELEGRAM_BOT_TOKEN","")
 BINANCE_BASE_URL=os.getenv("BINANCE_BASE_URL","https://fapi.binance.com")
 DATABASE_PATH=os.getenv("DATABASE_PATH","data/signals.db")
 # Frozen research parameters. Railway environment variables from older
-# releases must not silently alter the v10R.4 cohort.
+# releases must not silently alter the v10R.5 cohort.
 MIN_SIGNAL_SCORE=82.0
 MAX_SYMBOLS_TO_SCAN=int(os.getenv("MAX_SYMBOLS_TO_SCAN","0"))  # 0 = every liquid USDT perpetual
 MIN_24H_QUOTE_VOLUME=float(os.getenv("MIN_24H_QUOTE_VOLUME","15000000"))
@@ -19,10 +19,10 @@ AUTO_SCAN_INTERVAL_MIN=int(os.getenv("AUTO_SCAN_INTERVAL_MIN","10"))
 SIGNAL_COOLDOWN_HOURS=24
 DEEP_ANALYSIS_LIMIT=int(os.getenv("DEEP_ANALYSIS_LIMIT","0"))  # 0 = deep-check every candidate
 SIGNAL_MAX_AGE_HOURS=48
-APP_VERSION="10R.4"
+APP_VERSION="10R.5"
 # Fixed per release so forward-test cohorts cannot be mixed accidentally by an
 # old Railway environment variable.
-STRATEGY_VERSION="6.0.4-research"
+STRATEGY_VERSION="6.0.5-research"
 DEFAULT_RISK_PCT=float(os.getenv("DEFAULT_RISK_PCT","0.5"))
 MAX_RISK_PCT=float(os.getenv("MAX_RISK_PCT","1.0"))
 DAILY_STOP_R=float(os.getenv("DAILY_STOP_R","-2.0"))

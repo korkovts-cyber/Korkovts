@@ -160,7 +160,7 @@ async def get_derivatives_snapshot(symbol,adl=None):
         _get("/futures/data/openInterestHist",{"symbol":symbol,"period":"15m","limit":13}),
         _get("/futures/data/takerlongshortRatio",{"symbol":symbol,"period":"15m","limit":6}),
         _get("/futures/data/globalLongShortAccountRatio",{"symbol":symbol,"period":"15m","limit":3}),
-        _get("/futures/data/topLongShortPositionRatio",{"symbol":symbol,"period":"15m","limit":3}),
+        _get("/futures/data/topLongShortPositionRatio",{"symbol":symbol,"period":"15m","limit":6}),
         _get("/fapi/v1/depth",{"symbol":symbol,"limit":20}),
         _get("/futures/data/basis",{"pair":symbol,"contractType":"PERPETUAL","period":"1h","limit":25}),
         adl_request,return_exceptions=True)
@@ -194,6 +194,11 @@ async def get_derivatives_snapshot(symbol,adl=None):
     oi_values=[float(x.get("sumOpenInterestValue",0)) for x in oi_hist]
     oi_change=((oi_values[-1]/oi_values[0]-1)*100) if len(oi_values)>1 and oi_values[0] else 0
     taker_ratios=[float(x.get("buySellRatio",1)) for x in taker]
+    top_position_ratios=[float(x.get("longShortRatio",1)) for x in top_pos]
+    top_position_change_pct=(
+        (top_position_ratios[-1]/top_position_ratios[0]-1)*100
+        if len(top_position_ratios)>1 and top_position_ratios[0] else 0
+    )
     bid_rows=depth.get("bids") or []; ask_rows=depth.get("asks") or []
     bids=sum(float(p)*float(q) for p,q in bid_rows)
     asks=sum(float(p)*float(q) for p,q in ask_rows)
@@ -217,6 +222,7 @@ async def get_derivatives_snapshot(symbol,adl=None):
             "taker_ratio":sum(taker_ratios[-3:])/min(3,len(taker_ratios)) if taker_ratios else 1,
             "global_ls":float(global_ls[-1].get("longShortRatio",1)) if global_ls else 1,
             "top_position_ls":float(top_pos[-1].get("longShortRatio",1)) if top_pos else 1,
+            "top_position_change_pct":top_position_change_pct,
             "book_imbalance":imbalance,"spread_bps":((best_ask-best_bid)/mid*10000) if mid else 999,
             "basis_bps":basis_rate*10000,"basis_change_24h_bps":basis_change_24h_bps,
             "adl_risk":adl_risk,"adl_age_minutes":float(adl_row.get("age_minutes",9999)),

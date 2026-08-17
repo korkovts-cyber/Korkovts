@@ -153,6 +153,26 @@ async def signal(update, context):
         await msg.reply_text("⚠️ Не удалось получить все рыночные данные. Попробуй ещё раз через минуту.", reply_markup=menu())
 
 
+def _decision_details(diagnostics):
+    if not diagnostics:
+        return ""
+    deep=list(diagnostics.get("deep_rejections") or [])
+    rows=deep or list(diagnostics.get("near_candidates") or [])
+    if not rows:
+        return ""
+    title="Финальный отсев" if deep else "Ближе всего к подтверждённому сетапу"
+    lines=[f"\n\n🧭 <b>{title}:</b>"]
+    for row in rows[:3]:
+        issues=[escape(str(issue)) for issue in (row.get("issues") or [])[:2]]
+        reason="; ".join(issues) or "не прошло соотношение входа и стопа"
+        lines.append(
+            f"• <b>{escape(str(row.get('symbol','?')))} {escape(str(row.get('side','?')))}</b> · "
+            f"оценка {float(row.get('raw',0)):.0f}: {reason}"
+        )
+    lines.append("Это список наблюдения, <b>не команда на вход</b>.")
+    return "\n".join(lines)
+
+
 async def _send_results(bot,chat_id,results,automatic=False,short=False,diagnostics=None):
     label = "КОРОТКИЕ СДЕЛКИ" if short else ("АВТОСКАН" if automatic else "СКАН РЫНКА")
     stamp = datetime.now(timezone.utc).strftime("%H:%M UTC")
@@ -176,6 +196,7 @@ async def _send_results(bot,chat_id,results,automatic=False,short=False,diagnost
                     f"\nПосле проверки OI, taker-flow, ADL, спреда и новостей "
                     f"отклонено: <b>{diagnostics.get('deep_rejected',0)}</b>."
                 )
+            details+=_decision_details(diagnostics)
         return await bot.send_message(
             chat_id,
             f"📡 <b>{label} ЗАВЕРШЁН</b> · {stamp}\n━━━━━━━━━━━━━━━━━━\n"

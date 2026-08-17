@@ -40,7 +40,8 @@ def _begin_diagnostics(kind):
             "finished_at":None,"liquid":0,"prefiltered":0,"deep_checked":0,"final":0,
             "technical_rejected":0,"technical_errors":0,"derivatives_incomplete":0,
             "deep_rejected":0,"deep_errors":0,"news_sources":0,"regime":"UNKNOWN",
-            "threshold":None,"independent_mode":False,"error_examples":[]}
+            "threshold":None,"independent_mode":False,"error_examples":[],
+            "near_candidates":[],"deep_rejections":[]}
 
 def _bump(diagnostics,key):
     if diagnostics is not None:
@@ -51,6 +52,18 @@ def _record_error(diagnostics,key,symbol,exc):
     if diagnostics is not None and len(diagnostics["error_examples"])<5:
         diagnostics["error_examples"].append(f"{symbol}: {type(exc).__name__}: {exc}")
     log.warning("%s failed for %s: %s",key,symbol,exc)
+
+def _record_decision(diagnostics,key,audit):
+    if diagnostics is None or not audit or not audit.get("symbol"):
+        return
+    row={name:audit.get(name) for name in
+         ("symbol","timeframe","side","raw","threshold","setup","distance_atr","adx","htf","quality")}
+    row["issues"]=list(audit.get("issues") or ["соотношение входа и стопа не прошло"])
+    rows=diagnostics.setdefault(key,[])
+    rows[:]=[existing for existing in rows if existing.get("symbol")!=row["symbol"]]
+    rows.append(row)
+    rows.sort(key=lambda item:float(item.get("raw",0)),reverse=True)
+    del rows[5:]
 
 def _finish_diagnostics(diagnostics,status,reason=""):
     diagnostics["status"]=status
@@ -115,11 +128,13 @@ async def technical_candidate(symbol,market_context=None,semaphore=None,news=Non
             lower,a,b=await asyncio.gather(get_klines(symbol,"15m",260),get_klines(symbol,"1h",350),
                 get_klines(symbol,"4h",350))
         market_bias=(market_context or {}).get("bias")
+        audit={}
         preliminary=analyze(symbol,"1H",a,b,max(60,min_score-15),lower,market_bias,None,
-                            for_symbol(news or {},symbol),market_context)
+                            for_symbol(news or {},symbol),market_context,audit=audit)
         if preliminary:
             return symbol,lower,a,b,preliminary
         _bump(diagnostics,"technical_rejected")
+        _record_decision(diagnostics,"near_candidates",audit)
         return None
     except Exception as exc:  # noqa: BLE001 - isolate one symbol from the market scan.
         _record_error(diagnostics,"technical_errors",symbol,exc)
@@ -142,8 +157,9 @@ async def deep_candidate(candidate,market_context,semaphore,news,adl_risks,
         d.update(liquidation_snapshot(symbol,oi_notional))
         penalty=calibration_penalty(symbol,preliminary.side,"1H")
         threshold=min(95,min_score+penalty)
+        audit={}
         result=analyze(symbol,"1H",a,b,threshold,lower,market_context.get("bias"),d,
-                       for_symbol(news,symbol),market_context)
+                       for_symbol(news,symbol),market_context,audit=audit)
         shadow=reason=None
         if result is None and (str(d.get("adl_risk","unknown")).lower()!="low" or not d.get("adl_fresh")):
             baseline=dict(d); baseline.update(adl_risk="low",adl_fresh=True,adl_age_minutes=0)
@@ -152,6 +168,7 @@ async def deep_candidate(candidate,market_context,semaphore,news,adl_risks,
             reason=_adl_shadow_reason(d) if shadow else None
         if result is None:
             _bump(diagnostics,"deep_rejected")
+            _record_decision(diagnostics,"deep_rejections",audit)
         return result,shadow,reason
     except Exception as exc:  # noqa: BLE001 - isolate one symbol from the market scan.
         _record_error(diagnostics,"deep_errors",symbol,exc)
@@ -165,11 +182,13 @@ async def short_technical_candidate(symbol,market_context=None,semaphore=None,ne
             lower,base,higher=await asyncio.gather(
                 get_klines(symbol,"5m",300),get_klines(symbol,"15m",350),get_klines(symbol,"1h",350))
         market_bias=(market_context or {}).get("bias")
+        audit={}
         preliminary=analyze(symbol,"15M",base,higher,max(65,min_score-12),lower,market_bias,None,
-                            for_symbol(news or {},symbol),market_context)
+                            for_symbol(news or {},symbol),market_context,audit=audit)
         if preliminary:
             return symbol,lower,base,higher,preliminary
         _bump(diagnostics,"technical_rejected")
+        _record_decision(diagnostics,"near_candidates",audit)
         return None
     except Exception as exc:  # noqa: BLE001 - isolate one symbol from the market scan.
         _record_error(diagnostics,"technical_errors",symbol,exc)
@@ -192,8 +211,9 @@ async def short_deep_candidate(candidate,market_context,semaphore,news,adl_risks
         derivatives.update(liquidation_snapshot(symbol,oi_notional))
         penalty=calibration_penalty(symbol,preliminary.side,"15M")
         threshold=min(95,min_score+4+penalty)
+        audit={}
         result=analyze(symbol,"15M",base,higher,threshold,lower,market_context.get("bias"),
-                       derivatives,for_symbol(news,symbol),market_context)
+                       derivatives,for_symbol(news,symbol),market_context,audit=audit)
         shadow=reason=None
         if result is None and (str(derivatives.get("adl_risk","unknown")).lower()!="low"
                                or not derivatives.get("adl_fresh")):
@@ -207,6 +227,7 @@ async def short_deep_candidate(candidate,market_context,semaphore,news,adl_risks
             shadow.expected_window="30 минут–4 часа"
         if result is None:
             _bump(diagnostics,"deep_rejected")
+            _record_decision(diagnostics,"deep_rejections",audit)
         return result,shadow,reason
     except Exception as exc:  # noqa: BLE001 - isolate one symbol from the market scan.
         _record_error(diagnostics,"deep_errors",symbol,exc)

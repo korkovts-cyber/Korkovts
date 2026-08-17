@@ -33,7 +33,7 @@ class Signal:
     cluster_correlation:float=0
 
 def analyze(symbol,timeframe,df,higher=None,min_score=75,lower=None,market_bias=None,
-            derivatives=None,news=None,market_context=None):
+            derivatives=None,news=None,market_context=None,audit=None):
     x=enrich(df)
     if len(x)<220: return None
     h=enrich(higher) if higher is not None and len(higher)>220 else None
@@ -106,12 +106,12 @@ def analyze(symbol,timeframe,df,higher=None,min_score=75,lower=None,market_bias=
         sr.append("нейтральный BTC: монета подтверждается независимо")
     funding=float((derivatives or {}).get("funding",0))
     oi=float((derivatives or {}).get("open_interest",0))
-    micro_long=micro_short=0
     oi_change=price_change=0.0
-    taker=1.0; spread=0.0; crowd=1.0; basis=0.0; book=0.0; top=1.0
+    taker=1.0; spread=0.0; crowd=1.0; basis=0.0; book=0.0; top=1.0; top_change=0.0
     if (derivatives or {}).get("deep_data"):
         oi_change=float(derivatives.get("oi_change_pct",0)); taker=float(derivatives.get("taker_ratio",1))
         book=float(derivatives.get("book_imbalance",0)); top=float(derivatives.get("top_position_ls",1))
+        top_change=float(derivatives.get("top_position_change_pct",0))
         crowd=float(derivatives.get("global_ls",1)); spread=float(derivatives.get("spread_bps",999))
         basis=float(derivatives.get("basis_bps",0))
         lookback=12 if timeframe=="15M" else 3
@@ -124,14 +124,14 @@ def analyze(symbol,timeframe,df,higher=None,min_score=75,lower=None,market_bias=
             L+=2; lr.append("рост преимущественно за счёт закрытия SHORT — подтверждение слабее")
         elif oi_change<=-0.8 and price_change<=-0.4:
             S+=2; sr.append("падение преимущественно за счёт ликвидации LONG — подтверждение слабее")
-        if taker>=1.05: L+=6; micro_long+=1; quality_long+=1; lr.append(f"taker-покупки преобладают ({taker:.2f})")
-        if taker<=0.95: S+=6; micro_short+=1; quality_short+=1; sr.append(f"taker-продажи преобладают ({taker:.2f})")
+        if taker>=1.05: L+=6; quality_long+=1; lr.append(f"taker-покупки преобладают ({taker:.2f})")
+        if taker<=0.95: S+=6; quality_short+=1; sr.append(f"taker-продажи преобладают ({taker:.2f})")
         # One REST order-book snapshot is easy to spoof, so it is context only,
         # not an independent confirmation.
         if book>=0.08: L+=2; lr.append(f"моментальный дисбаланс стакана в покупки ({book:+.0%})")
         if book<=-0.08: S+=2; sr.append(f"моментальный дисбаланс стакана в продажи ({book:+.0%})")
-        if top>=1.05: L+=2; micro_long+=1; lr.append(f"крупные позиции преимущественно LONG ({top:.2f})")
-        if top<=0.95: S+=2; micro_short+=1; sr.append(f"крупные позиции преимущественно SHORT ({top:.2f})")
+        if top>=1.05: L+=2; lr.append(f"крупные позиции преимущественно LONG ({top:.2f})")
+        if top<=0.95: S+=2; sr.append(f"крупные позиции преимущественно SHORT ({top:.2f})")
         if crowd>=1.8: L-=5; lr.append("штраф: толпа перегружена LONG")
         if crowd<=0.60: S-=5; sr.append("штраф: толпа перегружена SHORT")
         if basis>=12: L-=4; lr.append("штраф: фьючерс заметно выше индекса")
@@ -188,12 +188,16 @@ def analyze(symbol,timeframe,df,higher=None,min_score=75,lower=None,market_bias=
     # several symbols had aligned HTF trend, momentum and money flow.  Admit a
     # controlled continuation only while price is not overextended and the
     # move remains efficient; all final derivatives/ADL/spread gates still run.
-    continuation_long=(long_trend and .35<=distance_atr<=1.60
+    extended_long=distance_atr>1.60
+    extended_short=distance_atr< -1.60
+    continuation_long=(long_trend and .35<=distance_atr<=1.90
                        and a.adx>=22 and a.efficiency20>=.25
-                       and 52<=a.rsi<=70 and a.macd_hist>0 and a.close>a.vwap20)
-    continuation_short=(short_trend and -1.60<=distance_atr<=-.35
+                       and 52<=a.rsi<=70 and a.macd_hist>0 and a.close>a.vwap20
+                       and (not extended_long or a.close<p.close))
+    continuation_short=(short_trend and -1.90<=distance_atr<=-.35
                         and a.adx>=22 and a.efficiency20>=.25
-                        and 30<=a.rsi<=48 and a.macd_hist<0 and a.close<a.vwap20)
+                        and 30<=a.rsi<=48 and a.macd_hist<0 and a.close<a.vwap20
+                        and (not extended_short or a.close>p.close))
     if derivatives is not None:
         breakout_long=breakout_long and oi_change>=0.5 and price_change>=0.3 and taker>=1.03
         breakout_short=breakout_short and oi_change>=0.5 and price_change<=-0.3 and taker<=0.97
@@ -230,6 +234,7 @@ def analyze(symbol,timeframe,df,higher=None,min_score=75,lower=None,market_bias=
             "derivatives":{"funding":funding,"open_interest":oi,"oi_change_pct":oi_change,
                            "price_change_pct":price_change,"taker_ratio":taker,
                            "global_long_short":crowd,"top_position_long_short":top,
+                           "top_position_change_pct":top_change,
                            "book_imbalance":book,"spread_bps":spread,"basis_bps":basis,
                            "basis_change_24h_bps":float((derivatives or {}).get("basis_change_24h_bps",0)),
                            "adl_risk":adl_risk,
@@ -243,14 +248,61 @@ def analyze(symbol,timeframe,df,higher=None,min_score=75,lower=None,market_bias=
             "market":dict(market_context or {"bias":market_bias}),
         }
 
-    # Final signals require a complete-enough derivatives snapshot. The
-    # derivatives=None branch is used only by the cheap preliminary prefilter.
+    # Final signals require a complete-enough derivatives snapshot.  The
+    # absolute top-trader ratio is useful context but has a persistent market
+    # bias, so it no longer has to cross 1.00 in the trade direction.  Instead,
+    # directional taker flow is mandatory and a rapid top-position move against
+    # the setup remains a veto.
     adl_ok=(derivatives is None or (adl_risk in ("low","medium") and adl_fresh))
-    deep_ok=(derivatives is None or ((derivatives or {}).get("deep_data") and adl_ok and micro_long>=2
+    top_long_ok=derivatives is None or top_change>=-5.0
+    top_short_ok=derivatives is None or top_change<=5.0
+    taker_long_ok=derivatives is None or taker>=1.03
+    taker_short_ok=derivatives is None or taker<=.97
+    deep_ok=(derivatives is None or ((derivatives or {}).get("deep_data") and adl_ok
+                                    and taker_long_ok and top_long_ok
                                     and oi_change>=-0.5 and spread<=5 and funding<=0.0012
                                     and crowd<1.8 and basis<20))
     regime_ok=market_bias in (None,"LONG")
     leverage=1 if float(a.atr_pct)>=1.5 or adl_risk=="medium" else 2
+
+    def write_audit():
+        if audit is None:
+            return
+        use_long=L>=S
+        side="LONG" if use_long else "SHORT"
+        setup=setup_long if use_long else setup_short
+        raw=float(L if use_long else S); other=float(S if use_long else L)
+        htf=htf_long if use_long else htf_short
+        quality=quality_long if use_long else quality_short
+        trend=long_trend if use_long else short_trend
+        issues=[]
+        if not trend: issues.append("EMA-тренд не выстроен")
+        if not setup:
+            if abs(distance_atr)>1.90: issues.append("цена слишком далеко от EMA20")
+            elif abs(distance_atr)>1.60: issues.append("ждём первый откат после импульса")
+            elif float(a.adx)<22: issues.append("недостаточный импульс ADX")
+            elif derivatives is not None: issues.append("цена/OI/taker не подтвердили вход")
+            else: issues.append("нет подтверждённой точки входа")
+        if raw<float(min_score): issues.append(f"оценка {raw:.0f} ниже {float(min_score):.0f}")
+        if raw-other<15: issues.append("направление неоднозначно")
+        if not htf: issues.append("старший таймфрейм не подтвердил")
+        if quality<3: issues.append(f"подтверждений качества {quality}/3")
+        if market_bias not in (None,side): issues.append("направление против режима BTC")
+        if derivatives is not None:
+            if not (derivatives or {}).get("deep_data"): issues.append("неполные данные деривативов")
+            if not adl_ok: issues.append(f"ADL {adl_risk.upper()} или устарел")
+            if spread>5: issues.append(f"спред {spread:.1f} б.п. слишком широк")
+            if oi_change<-.5: issues.append(f"OI снижается {oi_change:+.1f}%")
+            if use_long and not taker_long_ok: issues.append(f"taker {taker:.2f} не подтверждает LONG")
+            if not use_long and not taker_short_ok: issues.append(f"taker {taker:.2f} не подтверждает SHORT")
+            if use_long and not top_long_ok: issues.append("крупные позиции быстро сокращают LONG")
+            if not use_long and not top_short_ok: issues.append("крупные позиции быстро наращивают LONG")
+        audit.update({"symbol":symbol,"timeframe":timeframe,"side":side,"raw":raw,
+                      "opposite":other,"threshold":float(min_score),"setup":setup,
+                      "distance_atr":float(distance_atr),"adx":float(a.adx),
+                      "htf":bool(htf),"quality":int(quality),"issues":issues,"passed":False})
+
+    write_audit()
     if (setup_long and regime_ok and L>=min_score and L-S>=15 and htf_long
             and quality_long>=3 and a.adx>=18 and a.rsi<75 and deep_ok and news_ok
             and news_score>-0.80):
@@ -258,8 +310,12 @@ def analyze(symbol,timeframe,df,higher=None,min_score=75,lower=None,market_bias=
             anchor=float(a.high20); lo=anchor-vol*.10; hi=anchor+vol*.10; entry=hi
             stop=anchor-vol*1.25
         elif continuation_long:
-            lo=price-vol*.10; hi=price+vol*.10; entry=hi
-            stop=min(entry-vol*1.25,float(a.ema20)-vol*.35)
+            if extended_long:
+                lo=price-vol*.35; hi=price-vol*.15; entry=hi
+                stop=min(entry-vol*1.25,float(a.ema20)-vol*.20)
+            else:
+                lo=price-vol*.10; hi=price+vol*.10; entry=hi
+                stop=min(entry-vol*1.25,float(a.ema20)-vol*.35)
         else:
             lo=price-vol*.20; hi=price+vol*.05; entry=hi
             stop=min(entry-vol*1.35,support-vol*.10)
@@ -267,6 +323,7 @@ def analyze(symbol,timeframe,df,higher=None,min_score=75,lower=None,market_bias=
         if not vol*.75<=risk<=vol*2.2: return None
         cost_r=entry*(ROUND_TRIP_COST_PCT/100)/risk
         if cost_r>0.25: return None
+        if audit is not None: audit["passed"]=True
         return Signal(symbol,timeframe,"LONG",_strength_score(L),lo,hi,stop,entry+risk,entry+2*risk,entry+3*risk,2,lr,
                       funding=funding,open_interest=oi,volatility_pct=float(a.atr_pct),
                       leverage=leverage,setup_type=setup_long,
@@ -276,7 +333,8 @@ def analyze(symbol,timeframe,df,higher=None,min_score=75,lower=None,market_bias=
                       estimated_cost_r=cost_r,adl_risk=adl_risk,liquidation=liquidation,
                       market_context=dict(market_context or {"bias":market_bias}),
                       feature_snapshot=feature_snapshot("LONG",setup_long))
-    deep_ok=(derivatives is None or ((derivatives or {}).get("deep_data") and adl_ok and micro_short>=2
+    deep_ok=(derivatives is None or ((derivatives or {}).get("deep_data") and adl_ok
+                                    and taker_short_ok and top_short_ok
                                     and oi_change>=-0.5 and spread<=5 and funding>=-0.0012
                                     and crowd>0.60 and basis>-20))
     regime_ok=market_bias in (None,"SHORT")
@@ -287,8 +345,12 @@ def analyze(symbol,timeframe,df,higher=None,min_score=75,lower=None,market_bias=
             anchor=float(a.low20); lo=anchor-vol*.10; hi=anchor+vol*.10; entry=lo
             stop=anchor+vol*1.25
         elif continuation_short:
-            lo=price-vol*.10; hi=price+vol*.10; entry=lo
-            stop=max(entry+vol*1.25,float(a.ema20)+vol*.35)
+            if extended_short:
+                lo=price+vol*.15; hi=price+vol*.35; entry=lo
+                stop=max(entry+vol*1.25,float(a.ema20)+vol*.20)
+            else:
+                lo=price-vol*.10; hi=price+vol*.10; entry=lo
+                stop=max(entry+vol*1.25,float(a.ema20)+vol*.35)
         else:
             lo=price-vol*.05; hi=price+vol*.20; entry=lo
             stop=max(entry+vol*1.35,resistance+vol*.10)
@@ -296,6 +358,7 @@ def analyze(symbol,timeframe,df,higher=None,min_score=75,lower=None,market_bias=
         if not vol*.75<=risk<=vol*2.2: return None
         cost_r=entry*(ROUND_TRIP_COST_PCT/100)/risk
         if cost_r>0.25: return None
+        if audit is not None: audit["passed"]=True
         return Signal(symbol,timeframe,"SHORT",_strength_score(S),lo,hi,stop,entry-risk,entry-2*risk,entry-3*risk,2,sr,
                       funding=funding,open_interest=oi,volatility_pct=float(a.atr_pct),
                       leverage=leverage,setup_type=setup_short,
