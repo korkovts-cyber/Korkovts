@@ -2,7 +2,7 @@
 builder = "RAILPACK"
 
 [deploy]
-startCommand = "python -m app.bot"
+startCommand = "python -m unittest -v test_v1121.py && python bot_v1121.py"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
 overlapSeconds = 0
