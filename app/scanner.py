@@ -58,7 +58,7 @@ def _record_decision(diagnostics,key,audit):
         return
     row={name:audit.get(name) for name in
          ("symbol","timeframe","side","raw","threshold","setup","distance_atr","adx","htf","quality")}
-    row["issues"]=list(audit.get("issues") or ["ÑÐ¾Ð¾ÑÐ½Ð¾ÑÐµÐ½Ð¸Ðµ Ð²ÑÐ¾Ð´Ð° Ð¸ ÑÑÐ¾Ð¿Ð° Ð½Ðµ Ð¿ÑÐ¾ÑÐ»Ð¾"])
+    row["issues"]=list(audit.get("issues") or ["соотношение входа и стопа не прошло"])
     rows=diagnostics.setdefault(key,[])
     rows[:]=[existing for existing in rows if existing.get("symbol")!=row["symbol"]]
     rows.append(row)
@@ -98,14 +98,14 @@ def market_analysis_state(state):
     if neutral_mode:
         analysis_state["bias"]=None
         analysis_state["independent_mode"]=True
-        analysis_state["label"]="Ð½ÐµÐ¹ÑÑÐ°Ð»ÑÐ½ÑÐ¹ BTC: Ð¿Ð¾Ð¸ÑÐº Ð½ÐµÐ·Ð°Ð²Ð¸ÑÐ¸Ð¼ÑÑ ÑÐµÑÐ°Ð¿Ð¾Ð²"
+        analysis_state["label"]="нейтральный BTC: поиск независимых сетапов"
     elif breadth_conflict:
         # V10R.6: breadth conflict is a risk flag, not a whole-market kill switch.
         # Do not force every coin to follow BTC when most of the market disagrees.
         analysis_state["bias"]=None
         analysis_state["independent_mode"]=True
         analysis_state["breadth_risk"]=True
-        analysis_state["label"]="ÐºÐ¾Ð½ÑÐ»Ð¸ÐºÑ BTC Ð¸ ÑÐ¸ÑÐ¸Ð½Ñ ÑÑÐ½ÐºÐ°: Ð½ÐµÐ·Ð°Ð²Ð¸ÑÐ¸Ð¼Ð°Ñ Ð¿ÑÐ¾Ð²ÐµÑÐºÐ°"
+        analysis_state["label"]="конфликт BTC и ширины рынка: независимая проверка"
     return analysis_state,neutral_mode
 
 def _limit_live_results(results,neutral_mode):
@@ -226,9 +226,9 @@ async def short_deep_candidate(candidate,market_context,semaphore,news,adl_risks
                            baseline,for_symbol(news,symbol),market_context)
             reason=_adl_shadow_reason(derivatives) if shadow else None
         if result:
-            result.expected_window="30 Ð¼Ð¸Ð½ÑÑâ4 ÑÐ°ÑÐ°"
+            result.expected_window="30 минут–4 часа"
         if shadow:
-            shadow.expected_window="30 Ð¼Ð¸Ð½ÑÑâ4 ÑÐ°ÑÐ°"
+            shadow.expected_window="30 минут–4 часа"
         if result is None:
             _bump(diagnostics,"deep_rejected")
             _record_decision(diagnostics,"deep_rejections",audit)
@@ -260,13 +260,13 @@ async def market_state(tickers=None):
     breadth_blocked=breadth_is_extreme_against(bias,breadth)
     if breadth_blocked:
         bias="NEUTRAL"
-    atr_pct=float(x.atr_pct); adjustment=0; label="Ð½Ð¾ÑÐ¼Ð°Ð»ÑÐ½ÑÐ¹"
-    if atr_pct>=1.5: adjustment=6; label="Ð¿Ð¾Ð²ÑÑÐµÐ½Ð½Ð°Ñ Ð²Ð¾Ð»Ð°ÑÐ¸Ð»ÑÐ½Ð¾ÑÑÑ"
-    elif atr_pct<=0.30 or (float(x.adx)<16 and raw_bias=="NEUTRAL"): adjustment=4; label="ÑÐ»ÑÑ/Ð½Ð¸Ð·ÐºÐ¸Ð¹ Ð¸Ð¼Ð¿ÑÐ»ÑÑ"
-    elif raw_bias=="NEUTRAL": adjustment=2; label="Ð½ÐµÐ¾Ð¿ÑÐµÐ´ÐµÐ»ÑÐ½Ð½ÑÐ¹ ÑÑÐµÐ½Ð´"
+    atr_pct=float(x.atr_pct); adjustment=0; label="нормальный"
+    if atr_pct>=1.5: adjustment=6; label="повышенная волатильность"
+    elif atr_pct<=0.30 or (float(x.adx)<16 and raw_bias=="NEUTRAL"): adjustment=4; label="флэт/низкий импульс"
+    elif raw_bias=="NEUTRAL": adjustment=2; label="неопределённый тренд"
     base_adjustment=adjustment
     if breadth_blocked:
-        adjustment=max(adjustment,6); label="ÑÐ¸ÑÐ¸Ð½Ð° ÑÑÐ½ÐºÐ° ÑÐµÐ·ÐºÐ¾ Ð¿ÑÐ¾ÑÐ¸Ð² ÑÐµÐ¶Ð¸Ð¼Ð° BTC"
+        adjustment=max(adjustment,6); label="ширина рынка резко против режима BTC"
     return {"bias":bias,"btc_bias_raw":raw_bias,"score_adjustment":adjustment,
             "base_score_adjustment":base_adjustment,"label":label,
             "btc_atr_pct":atr_pct,"breadth":breadth,"breadth_blocked":breadth_blocked}
@@ -324,10 +324,10 @@ async def scan():
         final=_limit_live_results(final,neutral_mode)
         diagnostics["final"]=len(final)
         if neutral_mode:
-            reason=(f"BTC Ð½ÐµÐ¹ÑÑÐ°Ð»ÐµÐ½; Ð½ÐµÐ·Ð°Ð²Ð¸ÑÐ¸Ð¼ÑÐ¹ Ð¿Ð¾Ð¸ÑÐº Ñ Ð¿Ð¾ÑÐ¾Ð³Ð¾Ð¼ {min_score:.0f}, "
-                    f"Ð¼Ð°ÐºÑÐ¸Ð¼ÑÐ¼ {NEUTRAL_REGIME_MAX_SIGNALS} ÑÐ¸Ð³Ð½Ð°Ð»Ð° Ð·Ð° ÑÐºÐ°Ð½")
+            reason=(f"BTC нейтрален; независимый поиск с порогом {min_score:.0f}, "
+                    f"максимум {NEUTRAL_REGIME_MAX_SIGNALS} сигнала за скан")
         elif breadth_risk:
-            reason="ÐºÐ¾Ð½ÑÐ»Ð¸ÐºÑ BTC Ð¸ ÑÐ¸ÑÐ¸Ð½Ñ ÑÑÐ½ÐºÐ°: ÑÐ¸Ð³Ð½Ð°Ð» Ð½Ðµ Ð±Ð»Ð¾ÐºÐ¸ÑÑÐµÑÑÑ, ÐºÐ°Ð¶Ð´Ð°Ñ Ð¼Ð¾Ð½ÐµÑÐ° Ð¿ÑÐ¾Ð²ÐµÑÐµÐ½Ð° Ð½ÐµÐ·Ð°Ð²Ð¸ÑÐ¸Ð¼Ð¾"
+            reason="конфликт BTC и ширины рынка: сигнал не блокируется, каждая монета проверена независимо"
         else:
             reason=""
         _finish_diagnostics(diagnostics,"ok",reason)
@@ -391,10 +391,10 @@ async def scan_short():
         final=_limit_live_results(final,neutral_mode)
         diagnostics["final"]=len(final)
         if neutral_mode:
-            reason=(f"BTC Ð½ÐµÐ¹ÑÑÐ°Ð»ÐµÐ½; Ð½ÐµÐ·Ð°Ð²Ð¸ÑÐ¸Ð¼ÑÐ¹ Ð¿Ð¾Ð¸ÑÐº Ñ Ð¿Ð¾ÑÐ¾Ð³Ð¾Ð¼ {thresholds['short']:.0f}, "
-                    f"Ð¼Ð°ÐºÑÐ¸Ð¼ÑÐ¼ {NEUTRAL_REGIME_MAX_SIGNALS} ÑÐ¸Ð³Ð½Ð°Ð»Ð° Ð·Ð° ÑÐºÐ°Ð½")
+            reason=(f"BTC нейтрален; независимый поиск с порогом {thresholds['short']:.0f}, "
+                    f"максимум {NEUTRAL_REGIME_MAX_SIGNALS} сигнала за скан")
         elif breadth_risk:
-            reason="ÐºÐ¾Ð½ÑÐ»Ð¸ÐºÑ BTC Ð¸ ÑÐ¸ÑÐ¸Ð½Ñ ÑÑÐ½ÐºÐ°: ÐºÑÐ°ÑÐºÐ¾ÑÑÐ¾ÑÐ½ÑÐµ ÑÐµÑÐ°Ð¿Ñ Ð¿ÑÐ¾Ð²ÐµÑÐµÐ½Ñ Ð½ÐµÐ·Ð°Ð²Ð¸ÑÐ¸Ð¼Ð¾"
+            reason="конфликт BTC и ширины рынка: краткосрочные сетапы проверены независимо"
         else:
             reason=""
         _finish_diagnostics(diagnostics,"ok",reason)
