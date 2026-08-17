@@ -58,7 +58,7 @@ def _record_decision(diagnostics,key,audit):
         return
     row={name:audit.get(name) for name in
          ("symbol","timeframe","side","raw","threshold","setup","distance_atr","adx","htf","quality")}
-    row["issues"]=list(audit.get("issues") or ["соотношение входа и стопа не прошло"])
+    row["issues"]=list(audit.get("issues") or ["ÑÐ¾Ð¾ÑÐ½Ð¾ÑÐµÐ½Ð¸Ðµ Ð²ÑÐ¾Ð´Ð° Ð¸ ÑÑÐ¾Ð¿Ð° Ð½Ðµ Ð¿ÑÐ¾ÑÐ»Ð¾"])
     rows=diagnostics.setdefault(key,[])
     rows[:]=[existing for existing in rows if existing.get("symbol")!=row["symbol"]]
     rows.append(row)
@@ -78,9 +78,9 @@ def _too_many_errors(errors,total):
     return total>0 and (errors>=total or errors/total>0.25)
 
 def scan_thresholds(state):
-    """Return the frozen baseline gates for the current market regime."""
-    breadth_shadow=bool(state.get("breadth_blocked"))
-    adjustment=(state.get("base_score_adjustment",0) if breadth_shadow
+    """Return quality gates for the current market regime."""
+    breadth_blocked=bool(state.get("breadth_blocked"))
+    adjustment=(state.get("base_score_adjustment",0) if breadth_blocked
                 else state.get("score_adjustment",0))
     neutral_mode=state.get("btc_bias_raw")=="NEUTRAL"
     if neutral_mode:
@@ -91,22 +91,27 @@ def scan_thresholds(state):
             "neutral_mode":neutral_mode}
 
 def market_analysis_state(state):
-    """Let strong pairs prove themselves when BTC has no usable direction."""
+    """Allow strong coins to prove themselves when BTC direction is not trustworthy."""
     analysis_state=dict(state)
     neutral_mode=state.get("btc_bias_raw")=="NEUTRAL"
+    breadth_conflict=bool(state.get("breadth_blocked"))
     if neutral_mode:
         analysis_state["bias"]=None
         analysis_state["independent_mode"]=True
-        analysis_state["label"]="нейтральный BTC: поиск независимых сетапов"
-    elif state.get("breadth_blocked"):
-        analysis_state["bias"]=state["btc_bias_raw"]
-        analysis_state["label"]="теневая проверка экстремальной ширины рынка"
+        analysis_state["label"]="Ð½ÐµÐ¹ÑÑÐ°Ð»ÑÐ½ÑÐ¹ BTC: Ð¿Ð¾Ð¸ÑÐº Ð½ÐµÐ·Ð°Ð²Ð¸ÑÐ¸Ð¼ÑÑ ÑÐµÑÐ°Ð¿Ð¾Ð²"
+    elif breadth_conflict:
+        # V10R.6: breadth conflict is a risk flag, not a whole-market kill switch.
+        # Do not force every coin to follow BTC when most of the market disagrees.
+        analysis_state["bias"]=None
+        analysis_state["independent_mode"]=True
+        analysis_state["breadth_risk"]=True
+        analysis_state["label"]="ÐºÐ¾Ð½ÑÐ»Ð¸ÐºÑ BTC Ð¸ ÑÐ¸ÑÐ¸Ð½Ñ ÑÑÐ½ÐºÐ°: Ð½ÐµÐ·Ð°Ð²Ð¸ÑÐ¸Ð¼Ð°Ñ Ð¿ÑÐ¾Ð²ÐµÑÐºÐ°"
     return analysis_state,neutral_mode
 
 def _limit_live_results(results,neutral_mode):
-    if neutral_mode:
-        return results[:NEUTRAL_REGIME_MAX_SIGNALS]
-    return results
+    # One priority signal + up to three alternatives.
+    limit=NEUTRAL_REGIME_MAX_SIGNALS if neutral_mode else 4
+    return results[:max(1,limit)]
 
 def _adl_shadow_reason(derivatives):
     risk=str(derivatives.get("adl_risk","unknown")).upper()
@@ -136,7 +141,7 @@ async def technical_candidate(symbol,market_context=None,semaphore=None,news=Non
         _bump(diagnostics,"technical_rejected")
         _record_decision(diagnostics,"near_candidates",audit)
         return None
-    except Exception as exc:  # noqa: BLE001 - isolate one symbol from the market scan.
+    except Exception as exc:
         _record_error(diagnostics,"technical_errors",symbol,exc)
         return None
 
@@ -170,7 +175,7 @@ async def deep_candidate(candidate,market_context,semaphore,news,adl_risks,
             _bump(diagnostics,"deep_rejected")
             _record_decision(diagnostics,"deep_rejections",audit)
         return result,shadow,reason
-    except Exception as exc:  # noqa: BLE001 - isolate one symbol from the market scan.
+    except Exception as exc:
         _record_error(diagnostics,"deep_errors",symbol,exc)
         return None,None,None
 
@@ -190,7 +195,7 @@ async def short_technical_candidate(symbol,market_context=None,semaphore=None,ne
         _bump(diagnostics,"technical_rejected")
         _record_decision(diagnostics,"near_candidates",audit)
         return None
-    except Exception as exc:  # noqa: BLE001 - isolate one symbol from the market scan.
+    except Exception as exc:
         _record_error(diagnostics,"technical_errors",symbol,exc)
         return None
 
@@ -206,7 +211,6 @@ async def short_deep_candidate(candidate,market_context,semaphore,news,adl_risks
             log.info("skip short %s: incomplete derivatives snapshot (%s/%s)",
                      symbol,derivatives.get("data_quality",0),derivatives.get("data_quality_total",9))
             return None,None,None
-        # Short-term entries must clear a stricter score than swing entries.
         oi_notional=float(derivatives.get("open_interest",0))*float(derivatives.get("mark_price",0))
         derivatives.update(liquidation_snapshot(symbol,oi_notional))
         penalty=calibration_penalty(symbol,preliminary.side,"15M")
@@ -222,14 +226,14 @@ async def short_deep_candidate(candidate,market_context,semaphore,news,adl_risks
                            baseline,for_symbol(news,symbol),market_context)
             reason=_adl_shadow_reason(derivatives) if shadow else None
         if result:
-            result.expected_window="30 минут–4 часа"
+            result.expected_window="30 Ð¼Ð¸Ð½ÑÑâ4 ÑÐ°ÑÐ°"
         if shadow:
-            shadow.expected_window="30 минут–4 часа"
+            shadow.expected_window="30 Ð¼Ð¸Ð½ÑÑâ4 ÑÐ°ÑÐ°"
         if result is None:
             _bump(diagnostics,"deep_rejected")
             _record_decision(diagnostics,"deep_rejections",audit)
         return result,shadow,reason
-    except Exception as exc:  # noqa: BLE001 - isolate one symbol from the market scan.
+    except Exception as exc:
         _record_error(diagnostics,"deep_errors",symbol,exc)
         return None,None,None
 
@@ -243,8 +247,6 @@ async def market_state(tickers=None):
     base=enrich(a); higher=enrich(b)
     x=base.iloc[-1]; h=higher.iloc[-1]; hp=higher.iloc[-2]
     bias="NEUTRAL"
-    # Regime persistence filter: the 4H state must already have been aligned
-    # on the previous closed candle, not merely flip on the latest bar.
     if (x.close>x.ema200 and x.ema20>x.ema50 and x.supertrend_dir>0 and x.adx>=18
             and h.close>h.ema200 and h.ema20>h.ema50 and h.supertrend_dir>0
             and hp.close>hp.ema200 and hp.ema20>hp.ema50):
@@ -258,13 +260,13 @@ async def market_state(tickers=None):
     breadth_blocked=breadth_is_extreme_against(bias,breadth)
     if breadth_blocked:
         bias="NEUTRAL"
-    atr_pct=float(x.atr_pct); adjustment=0; label="нормальный"
-    if atr_pct>=1.5: adjustment=6; label="повышенная волатильность"
-    elif atr_pct<=0.30 or (float(x.adx)<16 and raw_bias=="NEUTRAL"): adjustment=4; label="флэт/низкий импульс"
-    elif raw_bias=="NEUTRAL": adjustment=2; label="неопределённый тренд"
+    atr_pct=float(x.atr_pct); adjustment=0; label="Ð½Ð¾ÑÐ¼Ð°Ð»ÑÐ½ÑÐ¹"
+    if atr_pct>=1.5: adjustment=6; label="Ð¿Ð¾Ð²ÑÑÐµÐ½Ð½Ð°Ñ Ð²Ð¾Ð»Ð°ÑÐ¸Ð»ÑÐ½Ð¾ÑÑÑ"
+    elif atr_pct<=0.30 or (float(x.adx)<16 and raw_bias=="NEUTRAL"): adjustment=4; label="ÑÐ»ÑÑ/Ð½Ð¸Ð·ÐºÐ¸Ð¹ Ð¸Ð¼Ð¿ÑÐ»ÑÑ"
+    elif raw_bias=="NEUTRAL": adjustment=2; label="Ð½ÐµÐ¾Ð¿ÑÐµÐ´ÐµÐ»ÑÐ½Ð½ÑÐ¹ ÑÑÐµÐ½Ð´"
     base_adjustment=adjustment
     if breadth_blocked:
-        adjustment=max(adjustment,6); label="ширина рынка резко против режима BTC"
+        adjustment=max(adjustment,6); label="ÑÐ¸ÑÐ¸Ð½Ð° ÑÑÐ½ÐºÐ° ÑÐµÐ·ÐºÐ¾ Ð¿ÑÐ¾ÑÐ¸Ð² ÑÐµÐ¶Ð¸Ð¼Ð° BTC"
     return {"bias":bias,"btc_bias_raw":raw_bias,"score_adjustment":adjustment,
             "base_score_adjustment":base_adjustment,"label":label,
             "btc_atr_pct":atr_pct,"breadth":breadth,"breadth_blocked":breadth_blocked}
@@ -283,11 +285,11 @@ async def scan():
         diagnostics["regime"]=bias
         if diagnostics["news_sources"]<1:
             raise ScanUnavailable("all news-risk sources are unavailable")
-        breadth_shadow=bool(state.get("breadth_blocked"))
+        breadth_risk=bool(state.get("breadth_blocked"))
         analysis_state,neutral_mode=market_analysis_state(state)
         thresholds=scan_thresholds(state)
         min_score=thresholds["main"]
-        diagnostics["independent_mode"]=neutral_mode
+        diagnostics["independent_mode"]=bool(neutral_mode or breadth_risk)
         diagnostics["threshold"]=min_score
         symbols=[s for s in symbols if tickers.get(s,{}).get("quote_volume",0)>=MIN_24H_QUOTE_VOLUME]
         symbols.sort(key=lambda s:tickers[s]["quote_volume"],reverse=True)
@@ -316,26 +318,22 @@ async def scan():
             raise ScanUnavailable(
                 f"deep analysis failed for {diagnostics['deep_errors']}/{diagnostics['deep_checked']} candidates")
         live=[row[0] for row in results if row and row[0]]
-        if breadth_shadow:
-            _store_shadows([(signal,"BREADTH_EXTREME") for signal in live])
-            final=[]
-        else:
-            _store_shadows([(row[1],row[2]) for row in results if row and row[1] and row[2]])
-            final=sorted(live,key=lambda x:x.score,reverse=True)
+        _store_shadows([(row[1],row[2]) for row in results if row and row[1] and row[2]])
+        final=sorted(live,key=lambda x:x.score,reverse=True)
         annotate_correlation_clusters(final,frames)
         final=_limit_live_results(final,neutral_mode)
         diagnostics["final"]=len(final)
         if neutral_mode:
-            reason=(f"BTC нейтрален; независимый поиск с порогом {min_score:.0f}, "
-                    f"максимум {NEUTRAL_REGIME_MAX_SIGNALS} сигнал за скан")
-        elif breadth_shadow:
-            reason="экстремальная ширина рынка; кандидаты сохранены только в shadow"
+            reason=(f"BTC Ð½ÐµÐ¹ÑÑÐ°Ð»ÐµÐ½; Ð½ÐµÐ·Ð°Ð²Ð¸ÑÐ¸Ð¼ÑÐ¹ Ð¿Ð¾Ð¸ÑÐº Ñ Ð¿Ð¾ÑÐ¾Ð³Ð¾Ð¼ {min_score:.0f}, "
+                    f"Ð¼Ð°ÐºÑÐ¸Ð¼ÑÐ¼ {NEUTRAL_REGIME_MAX_SIGNALS} ÑÐ¸Ð³Ð½Ð°Ð»Ð° Ð·Ð° ÑÐºÐ°Ð½")
+        elif breadth_risk:
+            reason="ÐºÐ¾Ð½ÑÐ»Ð¸ÐºÑ BTC Ð¸ ÑÐ¸ÑÐ¸Ð½Ñ ÑÑÐ½ÐºÐ°: ÑÐ¸Ð³Ð½Ð°Ð» Ð½Ðµ Ð±Ð»Ð¾ÐºÐ¸ÑÑÐµÑÑÑ, ÐºÐ°Ð¶Ð´Ð°Ñ Ð¼Ð¾Ð½ÐµÑÐ° Ð¿ÑÐ¾Ð²ÐµÑÐµÐ½Ð° Ð½ÐµÐ·Ð°Ð²Ð¸ÑÐ¸Ð¼Ð¾"
         else:
             reason=""
         _finish_diagnostics(diagnostics,"ok",reason)
         log.info("main scan: liquid=%s prefiltered=%s deep=%s final=%s regime=%s independent=%s threshold=%s errors=%s",
                  diagnostics["liquid"],diagnostics["prefiltered"],diagnostics["deep_checked"],
-                 diagnostics["final"],bias,neutral_mode,min_score,
+                 diagnostics["final"],bias,diagnostics["independent_mode"],min_score,
                  diagnostics["technical_errors"]+diagnostics["deep_errors"])
         return final
     except Exception as exc:
@@ -353,13 +351,14 @@ async def scan_short():
         diagnostics["regime"]=bias
         if diagnostics["news_sources"]<1:
             raise ScanUnavailable("all news-risk sources are unavailable")
-        breadth_shadow=bool(state.get("breadth_blocked"))
+        breadth_risk=bool(state.get("breadth_blocked"))
         analysis_state,neutral_mode=market_analysis_state(state)
         thresholds=scan_thresholds(state)
         min_score=thresholds["short_base"]
-        diagnostics["independent_mode"]=neutral_mode
+        diagnostics["independent_mode"]=bool(neutral_mode or breadth_risk)
         diagnostics["threshold"]=thresholds["short"]
-        symbols=[s for s in symbols if tickers.get(s,{}).get("quote_volume",0)>=max(MIN_24H_QUOTE_VOLUME,30_000_000)]
+        # V10R.6: scan substantially more short-term markets, but still require meaningful liquidity.
+        symbols=[s for s in symbols if tickers.get(s,{}).get("quote_volume",0)>=max(MIN_24H_QUOTE_VOLUME,10_000_000)]
         symbols.sort(key=lambda s:tickers[s]["quote_volume"],reverse=True)
         if MAX_SYMBOLS_TO_SCAN>0:
             symbols=symbols[:MAX_SYMBOLS_TO_SCAN]
@@ -386,26 +385,22 @@ async def scan_short():
             raise ScanUnavailable(
                 f"deep analysis failed for {diagnostics['deep_errors']}/{diagnostics['deep_checked']} candidates")
         live=[row[0] for row in results if row and row[0]]
-        if breadth_shadow:
-            _store_shadows([(signal,"BREADTH_EXTREME") for signal in live])
-            final=[]
-        else:
-            _store_shadows([(row[1],row[2]) for row in results if row and row[1] and row[2]])
-            final=sorted(live,key=lambda x:x.score,reverse=True)
+        _store_shadows([(row[1],row[2]) for row in results if row and row[1] and row[2]])
+        final=sorted(live,key=lambda x:x.score,reverse=True)
         annotate_correlation_clusters(final,frames)
         final=_limit_live_results(final,neutral_mode)
         diagnostics["final"]=len(final)
         if neutral_mode:
-            reason=(f"BTC нейтрален; независимый поиск с порогом {thresholds['short']:.0f}, "
-                    f"максимум {NEUTRAL_REGIME_MAX_SIGNALS} сигнал за скан")
-        elif breadth_shadow:
-            reason="экстремальная ширина рынка; кандидаты сохранены только в shadow"
+            reason=(f"BTC Ð½ÐµÐ¹ÑÑÐ°Ð»ÐµÐ½; Ð½ÐµÐ·Ð°Ð²Ð¸ÑÐ¸Ð¼ÑÐ¹ Ð¿Ð¾Ð¸ÑÐº Ñ Ð¿Ð¾ÑÐ¾Ð³Ð¾Ð¼ {thresholds['short']:.0f}, "
+                    f"Ð¼Ð°ÐºÑÐ¸Ð¼ÑÐ¼ {NEUTRAL_REGIME_MAX_SIGNALS} ÑÐ¸Ð³Ð½Ð°Ð»Ð° Ð·Ð° ÑÐºÐ°Ð½")
+        elif breadth_risk:
+            reason="ÐºÐ¾Ð½ÑÐ»Ð¸ÐºÑ BTC Ð¸ ÑÐ¸ÑÐ¸Ð½Ñ ÑÑÐ½ÐºÐ°: ÐºÑÐ°ÑÐºÐ¾ÑÑÐ¾ÑÐ½ÑÐµ ÑÐµÑÐ°Ð¿Ñ Ð¿ÑÐ¾Ð²ÐµÑÐµÐ½Ñ Ð½ÐµÐ·Ð°Ð²Ð¸ÑÐ¸Ð¼Ð¾"
         else:
             reason=""
         _finish_diagnostics(diagnostics,"ok",reason)
         log.info("short scan: liquid=%s prefiltered=%s deep=%s final=%s regime=%s independent=%s threshold=%s errors=%s",
                  diagnostics["liquid"],diagnostics["prefiltered"],diagnostics["deep_checked"],
-                 diagnostics["final"],bias,neutral_mode,thresholds["short"],
+                 diagnostics["final"],bias,diagnostics["independent_mode"],thresholds["short"],
                  diagnostics["technical_errors"]+diagnostics["deep_errors"])
         return final
     except Exception as exc:
