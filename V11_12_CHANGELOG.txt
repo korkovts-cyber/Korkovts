@@ -1,0 +1,19 @@
+Korkovts V11.12.0 SELF-HEALING EDGE
+
+Production fixes and upgrades over V11.11:
+- fail-closed bookTicker requirement in the final live-entry contract
+- strict finite-number guard: NaN/Inf/corrupted live fields cannot bypass thresholds
+- source-level rejection of malformed/non-finite aggTrade, bookTicker and depth levels
+- Flow Persistence Guard: last-10s multi-second activity + burst concentration veto
+- recent taker-flow reversal veto immediately before entry
+- L2 Microstructure Shock Guard: support withdrawal, spread shock, persistent adverse imbalance
+- routed WebSocket application-data watchdog with independent PUBLIC/MARKET self-healing reconnects
+- symbol-aware market-tape capture throttling and per-symbol forensic retention
+- correct V11.12 gate_version provenance in SQLite/JSON replay bundles
+- sequence-safe tape compaction: never silently trim a depth sequence into a fake replay
+- exact decision_anchor fallback when a full depth tape exceeds the bundle size limit
+- deterministic V11.12 live-gate replay helper
+- previous V11.11 Binance U/u/pu continuity contract remains intact
+
+These V11.12 gates do not add positive score. They can only keep an otherwise
+READY setup in WAIT when live execution evidence is not trustworthy.

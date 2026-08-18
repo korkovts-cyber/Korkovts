@@ -1,0 +1,63 @@
+KORKOVTS V11.11.0 · LIVE EDGE
+
+CRITICAL BINANCE WS ROUTE MIGRATION
+- Replaced legacy unrouted USD-M live WebSocket with two routed sessions.
+- PUBLIC route now carries bookTicker.
+- MARKET route now carries aggTrade.
+- The sessions reconnect independently, so taker-flow failure fails ENTRY NOW closed
+  without unnecessarily taking down the quote feed.
+- Added source-contract regression coverage so the legacy mixed URL cannot return.
+
+
+What changed
+1) Binance USD-M Futures sequence-synchronised local L2 order book.
+   - @depth@100ms public stream
+   - REST snapshot bridge
+   - Futures pu == previous u continuity check
+   - automatic fail-closed resync on any sequence gap
+   - freshness/exchange-lag watchdog
+   - stability warm-up, replenishment and 20 bps imbalance context
+
+2) ENTRY NOW Data Contract.
+   - A setup can no longer become READY if Futures L2 is unavailable, stale,
+     unsynchronised, warming after reconnect, recently gapped or strongly
+     opposing the trade direction.
+   - L2 is veto-only: it cannot create a trade that the existing strategy did
+     not already qualify.
+
+3) Market Tape Recorder.
+   - Keeps a bounded rolling buffer of public aggTrade, bookTicker and depth data.
+   - Saves compressed replay bundles around entry assessments.
+   - Redacts token/secret-like fields before persistence.
+   - Bounded SQLite retention prevents unbounded disk growth.
+
+4) Replay primitives.
+   - Reconstruct a local Futures book from snapshot + diff events.
+   - Re-run deterministic entry evaluation from stored candle/context bundles.
+
+5) Railway singleton lease.
+   - SQLite BEGIN IMMEDIATE lease prevents two live processes from sending signals
+     during restart/deploy overlap.
+   - 30-second heartbeat; loss of the lease stops the application.
+
+6) Versioning discipline.
+   - App version is 11.11.0.
+   - Existing strategy cohort remains 11.7.1-futures-evidence intentionally.
+   - New entry timing layer is tracked separately as 11.11.0-futures-l2 so the
+     historical strategy evidence is not silently reset or mixed.
+
+Release chain
+V11.11 preflight -> compileall -> V11.10+V11.11 core tests -> V11.10 release check
+-> V11.11 release check -> full inherited V11.10 regression suite -> bot_v11110.py
+
+VALIDATION
+- V11.11 focused network-free suite: 18 tests.
+- Railway startup gate total: 248 Python test methods (16 V11.10 core + 18 V11.11 core + 214 inherited regression).
+
+REPLAY ANCHORS
+- Added a rolling sequence-synchronised local depth anchor every ~45s.
+- Replay can now start from the latest local anchor instead of depending on the original REST snapshot remaining inside the tape window.
+
+CROSS-FEED COHERENCE
+- ENTRY NOW now requires fresh bookTicker data and agreement between bookTicker best bid/ask and the independent sequence-synchronised L2 book.
+- Large top-of-book divergence or a stale quote is a fail-closed WAIT.

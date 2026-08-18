@@ -1,4 +1,4 @@
-"""State-first L2 microstructure decision layer for V11.4.1.
+"""State-first L2 microstructure decision layer for V11.7.1.
 
 Research principle:
 1) identify the liquidity state first;

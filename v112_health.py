@@ -1,4 +1,4 @@
-"""Production data-health guard for V11.4.1 PRECISION AUDIT."""
+"""Production data-health guard for V11.7.1 PRECISION AUDIT."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import pandas as pd
 
 from app.config import DATABASE_PATH
 from app.market import _get, get_klines
+from v1171_sqlite import db_session
 from v11_live import health as ws_health
 
 
@@ -65,7 +66,7 @@ def _db_health():
     try:
         parent=os.path.dirname(DATABASE_PATH) or "."
         os.makedirs(parent,exist_ok=True)
-        with sqlite3.connect(DATABASE_PATH,timeout=3) as c:
+        with db_session(timeout=3) as c:
             c.execute("PRAGMA busy_timeout=10000")
             c.execute("SELECT 1").fetchone()
             table=c.execute(

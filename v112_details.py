@@ -1,4 +1,4 @@
-"""Exact Telegram detail references for V11.4.1."""
+"""Exact Telegram detail references for V11.7.1."""
 
 from __future__ import annotations
 
@@ -7,10 +7,11 @@ import sqlite3
 from dataclasses import asdict, is_dataclass
 
 from app.config import DATABASE_PATH
+from v1171_sqlite import db_session
 
 
 def init():
-    with sqlite3.connect(DATABASE_PATH,timeout=10) as c:
+    with db_session(timeout=10) as c:
         c.execute("""
             CREATE TABLE IF NOT EXISTS v112_detail_snapshots(
                 id INTEGER PRIMARY KEY,
@@ -45,7 +46,7 @@ def save_snapshot(signal,signal_id=None):
         "result":None,
         "pnl_r":None,
     }
-    with sqlite3.connect(DATABASE_PATH,timeout=10) as c:
+    with db_session(timeout=10) as c:
         cur=c.execute("""
             INSERT INTO v112_detail_snapshots(signal_id,symbol,timeframe,payload_json)
             VALUES(?,?,?,?)
@@ -56,14 +57,14 @@ def save_snapshot(signal,signal_id=None):
 
 
 def signal_row(signal_id):
-    with sqlite3.connect(DATABASE_PATH,timeout=10) as c:
+    with db_session(timeout=10) as c:
         c.row_factory=sqlite3.Row
         row=c.execute("SELECT * FROM signals WHERE id=?",(int(signal_id),)).fetchone()
     return dict(row) if row else None
 
 
 def snapshot_row(snapshot_id):
-    with sqlite3.connect(DATABASE_PATH,timeout=10) as c:
+    with db_session(timeout=10) as c:
         c.row_factory=sqlite3.Row
         row=c.execute("""
             SELECT id,signal_id,payload_json FROM v112_detail_snapshots WHERE id=?

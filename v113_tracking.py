@@ -1,4 +1,4 @@
-"""Delivery-aware tracker adapter for V11.4.1.
+"""Delivery-aware tracker adapter for V11.7.1.
 
 For delivered production signals:
 - the effective CREATED time is fixed once at max(original created_at, delivered_at);
@@ -15,6 +15,7 @@ import sqlite3
 from datetime import datetime, timezone
 
 from app.config import DATABASE_PATH
+from v1171_sqlite import db_session
 
 
 def _epoch(value):
@@ -60,7 +61,7 @@ def effective_tracking_start(created_at,delivered_at,last_checked_at,is_shadow=F
 
 
 def delivery_aware_open_signals(n=500):
-    with sqlite3.connect(DATABASE_PATH,timeout=10) as c:
+    with db_session(timeout=10) as c:
         c.row_factory=sqlite3.Row
         rows=[dict(r) for r in c.execute("""
             SELECT id,created_at,activated_at,last_checked_at,status,symbol,timeframe,side,

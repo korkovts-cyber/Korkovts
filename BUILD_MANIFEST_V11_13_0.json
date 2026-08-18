@@ -1,0 +1,29 @@
+{
+  "version": "11.13.0",
+  "codename": "GLOBAL INTELLIGENCE",
+  "overlay": true,
+  "runtime": "bot_v11130.py",
+  "preflight": "preflight_v11130.py",
+  "release_check": "release_check_v11130.py",
+  "auto_full_scan_minutes": 10,
+  "fast_radar_seconds": 60,
+  "fast_radar_max_candidates": 2,
+  "entry_monitor_seconds": 30,
+  "news_poll_seconds": 60,
+  "ambiguous_news_discovery_block_seconds": 180,
+  "prime_label_lock_seconds": 120,
+  "locally_executed_focused_methods": 110,
+  "app_dependent_core_methods": 16,
+  "inherited_regression_methods": 214,
+  "startup_total_methods": 340,
+  "python_files": 85,
+  "local_results": {
+    "focused": "110/110 PASS",
+    "warnings_as_errors": "PASS",
+    "compileall": "PASS",
+    "release_checks": "PASS",
+    "ast_parse": "PASS"
+  },
+  "base_contract": "app/ intentionally external; exact Git blob fingerprints pinned by v11100_base_contract.py",
+  "generated_at_utc": "2026-08-18T18:05:41.077264+00:00"
+}

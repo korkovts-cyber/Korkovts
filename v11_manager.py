@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sqlite3
+from contextlib import contextmanager
 
 from app.config import DATABASE_PATH
 from app.db import open_signals
@@ -20,10 +21,18 @@ from v11_live import price as live_price
 log=logging.getLogger(__name__)
 
 
+@contextmanager
 def _connect():
     c=sqlite3.connect(DATABASE_PATH,timeout=10)
     c.execute("PRAGMA busy_timeout=10000")
-    return c
+    try:
+        yield c
+        c.commit()
+    except Exception:
+        c.rollback()
+        raise
+    finally:
+        c.close()
 
 
 def init():

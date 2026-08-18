@@ -1,4 +1,4 @@
-"""Final execution + state-first microstructure revalidation for V11.4.1."""
+"""Final execution + state-first microstructure revalidation for V11.7.1."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Forward-only, counterfactual factor lab for V11.4.1."""
+"""Forward-only, counterfactual factor lab for V11.7.1."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import time
 from dataclasses import dataclass
 
 from app.config import DATABASE_PATH
+from v1171_sqlite import db_session
 
 FEATURES=("fresh","momentum","ofi","squeeze","residual","quarter")
 SHADOW_REASONS=("V1123_ALPHA_REJECT","V1123_PORTFOLIO")
@@ -114,18 +115,18 @@ def scorecards(timeframe,force=False):
 
     rows=[]
     try:
-        with sqlite3.connect(DATABASE_PATH,timeout=10) as c:
+        with db_session(timeout=10) as c:
             rows=c.execute("""
                 SELECT timeframe,side,COALESCE(pnl_r,0),feature_json,is_shadow,shadow_reason
                 FROM signals
                 WHERE status='CLOSED'
                   AND COALESCE(result,'') NOT LIKE 'AMBIGUOUS%'
                   AND feature_json IS NOT NULL
-                  AND COALESCE(release_version,'') LIKE '11.4.1%'
+                  AND COALESCE(release_version,'') LIKE '11.7.1%'
                   AND timeframe=?
                   AND (
                     COALESCE(is_shadow,0)=0
-                    OR shadow_reason IN ('V1141_ALPHA_REJECT','V1141_EXECUTION_REJECT','V1141_META_REJECT','V1141_PORTFOLIO','V1141_ENTRY_REJECT')
+                    OR shadow_reason IN ('V1142_ALPHA_REJECT','V1142_EXECUTION_REJECT','V1142_META_REJECT','V1142_PORTFOLIO','V1142_ENTRY_REJECT')
                   )
                 ORDER BY closed_at DESC
                 LIMIT 1600
@@ -241,7 +242,7 @@ def lab_text():
         "quarter":"Quarter-hour",
     }
     lines=[
-        "🧬 <b>V11.4.1 FACTOR LAB</b>",
+        "🧬 <b>V11.7.1 FACTOR LAB</b>",
         "━━━━━━━━━━━━━━━━━━",
         "1H и 15M обучаются отдельно.",
         "Production-сигналы сравниваются с counterfactual shadow-кандидатами.",

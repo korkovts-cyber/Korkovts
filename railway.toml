@@ -2,7 +2,7 @@
 builder = "RAILPACK"
 
 [deploy]
-startCommand = "python release_check_v1141.py && python -m unittest -v test_v1141.py && python bot_v1141.py"
+startCommand = "python preflight_v11130.py && python -m compileall -q . && python -m unittest -v test_v11100_core.py test_v11110_core.py test_v11120_core.py test_v11121_core.py test_v11122_core.py test_v11130_core.py && python release_check_v11100.py && python release_check_v11110.py && python release_check_v11120.py && python release_check_v11121.py && python release_check_v11122.py && python release_check_v11130.py && python -m unittest -v test_v11100.py && python bot_v11130.py"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
 overlapSeconds = 0

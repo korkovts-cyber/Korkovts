@@ -1,4 +1,4 @@
-"""Market-data integrity helpers for V11.4.1.
+"""Market-data integrity helpers for V11.7.1.
 
 Adds:
 - Binance server-clock guard.
@@ -184,7 +184,7 @@ async def normalize_signal(signal):
         issues.append("signal price above Binance maxPrice")
     if issues:
         raise RuntimeError("; ".join(issues))
-    signal.feature_snapshot.setdefault("exchange_meta_v1141",{}).update(meta)
+    signal.feature_snapshot.setdefault("exchange_meta_v1142",{}).update(meta)
     return signal
 
 
@@ -197,17 +197,17 @@ def stamp_lineage(signal):
         "tp2":float(signal.tp2),"tp3":float(signal.tp3),
         "score":float(getattr(signal,"score",0)),
         "pro":float(getattr(signal,"professional_rank",0)),
-        "feature_schema":"11.4.1",
+        "feature_schema":"11.7.1",
         "features":{
             k:v for k,v in (getattr(signal,"feature_snapshot",{}) or {}).items()
-            if k!="lineage_v1141"
+            if k!="lineage_v1142"
         },
     }
     encoded=json.dumps(payload,ensure_ascii=False,sort_keys=True,
                        separators=(",",":"),default=str).encode("utf-8")
     digest=hashlib.sha256(encoded).hexdigest()
-    signal.feature_snapshot.setdefault("lineage_v1141",{}).update({
-        "feature_schema_version":"11.4.1",
+    signal.feature_snapshot.setdefault("lineage_v1142",{}).update({
+        "feature_schema_version":"11.7.1",
         "sha256":digest,
         "stamped_at_epoch":time.time(),
     })

@@ -1,4 +1,4 @@
-"""Entry-conversion analytics for V11.4.1.
+"""Entry-conversion analytics for V11.7.1.
 
 This is observational. It does not change thresholds yet.
 It separates:
@@ -15,6 +15,7 @@ import sqlite3
 from dataclasses import dataclass
 
 from app.config import DATABASE_PATH
+from v1171_sqlite import db_session
 
 
 @dataclass(frozen=True)
@@ -40,10 +41,10 @@ def activation_rate(activated,expired,invalidated):
     return float(activated)/resolved if resolved else 0.0
 
 
-def stats(timeframe,release_like="11.4.1%"):
+def stats(timeframe,release_like="11.7.1%"):
     tf=str(timeframe).upper()
     try:
-        with sqlite3.connect(DATABASE_PATH,timeout=10) as c:
+        with db_session(timeout=10) as c:
             rows=c.execute("""
                 SELECT activated_at,status,result,COALESCE(pnl_r,0)
                 FROM signals
@@ -78,10 +79,10 @@ def stats(timeframe,release_like="11.4.1%"):
     )
 
 
-def breakdown(timeframe,release_like="11.4.1%",min_issued=10):
+def breakdown(timeframe,release_like="11.7.1%",min_issued=10):
     tf=str(timeframe).upper()
     try:
-        with sqlite3.connect(DATABASE_PATH,timeout=10) as c:
+        with db_session(timeout=10) as c:
             groups=c.execute("""
                 SELECT COALESCE(setup_type,'?'),side,
                        COUNT(*),
@@ -130,7 +131,7 @@ def group_activation(signal,min_resolved=30):
     if cached and time.time()-cached[0]<6*3600:
         return dict(cached[1])
     try:
-        with sqlite3.connect(DATABASE_PATH,timeout=10) as c:
+        with db_session(timeout=10) as c:
             row=c.execute("""
                 SELECT
                   SUM(CASE WHEN activated_at IS NOT NULL
@@ -142,7 +143,7 @@ def group_activation(signal,min_resolved=30):
                 WHERE timeframe=? AND side=? AND COALESCE(setup_type,'?')=?
                   AND COALESCE(is_shadow,0)=0
                   AND COALESCE(delivery_state,'DELIVERED')='DELIVERED'
-                  AND COALESCE(release_version,'') LIKE '11.4.1%'
+                  AND COALESCE(release_version,'') LIKE '11.7.1%'
                   AND COALESCE(result,'') NOT LIKE 'AMBIGUOUS%'
             """,key).fetchone()
         activated=int((row or [0,0,0])[0] or 0)
@@ -179,23 +180,23 @@ def negative_penalty(signal,min_resolved=30):
 
 def _reference_stats(timeframe):
     # V11.3.1 has the corrected delivery-aware entry clock and can be shown as
-    # a reference baseline, but it does NOT train V11.4.1 adaptive filters.
+    # a reference baseline, but it does NOT train V11.7.1 adaptive filters.
     return stats(timeframe,"11.3.1%")
 
 
 def text():
     lines=[
-        "🎯 <b>ENTRY QUALITY · V11.4.1</b>",
+        "🎯 <b>ENTRY QUALITY · V11.7.1</b>",
         "━━━━━━━━━━━━━━━━━━",
         "Отдельно измеряем реализуемость Entry и результат после активации.",
         "После ≥30 resolved наблюдений плохая реализуемость Entry может только понизить PRO; бонусов за высокий activation rate нет.",
     ]
     for tf in ("1H","15M"):
-        cur=stats(tf,"11.4.1%")
+        cur=stats(tf,"11.7.1%")
         ref=_reference_stats(tf)
         lines += [
             "",
-            f"<b>{tf}</b> · V11.4.1 issued <b>{cur.issued}</b>",
+            f"<b>{tf}</b> · V11.7.1 issued <b>{cur.issued}</b>",
             f"Entry activation <b>{cur.activation_rate*100:.0f}%</b> по resolved <b>{cur.resolved}</b> · "
             f"waiting <b>{cur.pending_entry}</b> · ambiguous <b>{cur.ambiguous}</b> · "
             f"expired <b>{cur.expired}</b> · invalidated <b>{cur.invalidated}</b>",

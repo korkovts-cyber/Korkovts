@@ -1,4 +1,4 @@
-"""Walk-forward meta-label precision gate for V11.4.1.
+"""Walk-forward meta-label precision gate for V11.7.1.
 
 The meta model answers a narrow question:
 "Given a signal that already passed the trading strategy, should this candidate
@@ -25,6 +25,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from app.config import DATABASE_PATH
+from v1171_sqlite import db_session
 
 FEATURE_NAMES=(
     "core_score","data_health","execution_quality","regime_quality",
@@ -94,7 +95,7 @@ def _training_row_allowed(feature,is_shadow,reason):
     if not (feature.get("meta_v113") or {}):
         return False
     if int(is_shadow or 0):
-        return str(reason or "") in ("V1141_META_REJECT","V1141_PORTFOLIO")
+        return str(reason or "") in ("V1142_META_REJECT","V1142_PORTFOLIO")
     return True
 
 
@@ -128,7 +129,7 @@ def _vector(score,side,feature):
 def _rows(timeframe,limit=1200):
     tf=str(timeframe).upper()
     try:
-        with sqlite3.connect(DATABASE_PATH,timeout=10) as c:
+        with db_session(timeout=10) as c:
             rows=c.execute("""
                 SELECT created_at,side,score,result,COALESCE(pnl_r,0),feature_json,
                        COALESCE(is_shadow,0),COALESCE(shadow_reason,'')
@@ -137,11 +138,11 @@ def _rows(timeframe,limit=1200):
                   AND COALESCE(result,'') NOT LIKE 'AMBIGUOUS%'
                   AND timeframe=?
                   AND feature_json IS NOT NULL
-                  AND COALESCE(release_version,'') LIKE '11.4.1%'
+                  AND COALESCE(release_version,'') LIKE '11.7.1%'
                   AND (
                     COALESCE(is_shadow,0)=0
                     OR COALESCE(shadow_reason,'') IN (
-                        'V1141_META_REJECT','V1141_PORTFOLIO'
+                        'V1142_META_REJECT','V1142_PORTFOLIO'
                     )
                   )
                 ORDER BY id DESC
@@ -379,7 +380,7 @@ def decide(signal):
 
 def report_text():
     lines=[
-        "🎯 <b>V11.4.1 META PRECISION</b>",
+        "🎯 <b>V11.7.1 META PRECISION</b>",
         "━━━━━━━━━━━━━━━━━━",
         "Meta-модель не предсказывает рынок с нуля — она фильтрует только уже подтверждённые сделки.",
         "До прохождения walk-forward gate она работает в LEARNING. Если рынок OOD — Meta делает ABSTAIN и передаёт решение детерминированным Production-фильтрам.",

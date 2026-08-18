@@ -1,4 +1,4 @@
-"""Ambiguity-aware tracker patch for V11.4.1.
+"""Ambiguity-aware tracker patch for V11.7.1.
 
 1m OHLC cannot reveal intrabar event order. If the same candle touches both
 entry and invalidation, or both SL and TP2 after activation, the observation is

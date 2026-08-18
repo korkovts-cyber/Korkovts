@@ -1,8 +1,8 @@
-"""Block-bootstrap robustness report for V11.4.1.
+"""Block-bootstrap robustness report for V11.7.1.
 
 Signals issued on the same market day are correlated. Resampling individual
 trades pretends they are independent and can make uncertainty look too small.
-V11.4.1 therefore resamples whole UTC-day blocks.
+V11.7.1 therefore resamples whole UTC-day blocks.
 """
 
 from __future__ import annotations
@@ -13,11 +13,12 @@ from collections import defaultdict
 import numpy as np
 
 from app.config import DATABASE_PATH
+from v1171_sqlite import db_session
 
 
 def _day_blocks(timeframe,limit=700):
     try:
-        with sqlite3.connect(DATABASE_PATH,timeout=10) as c:
+        with db_session(timeout=10) as c:
             rows=c.execute("""
                 SELECT substr(COALESCE(closed_at,created_at),1,10),COALESCE(pnl_r,0)
                 FROM signals
@@ -26,7 +27,7 @@ def _day_blocks(timeframe,limit=700):
                   AND timeframe=?
                   AND COALESCE(is_shadow,0)=0
                   AND COALESCE(delivery_state,'DELIVERED')='DELIVERED'
-                  AND COALESCE(release_version,'') LIKE '11.4.1%'
+                  AND COALESCE(release_version,'') LIKE '11.7.1%'
                 ORDER BY closed_at DESC LIMIT ?
             """,(str(timeframe).upper(),int(limit))).fetchall()
     except Exception:
@@ -65,7 +66,7 @@ def bootstrap(timeframe,simulations=1800):
 
 def text():
     lines=[
-        "🧪 <b>V11.4.1 BLOCK ROBUSTNESS</b>",
+        "🧪 <b>V11.7.1 BLOCK ROBUSTNESS</b>",
         "━━━━━━━━━━━━━━━━━━",
         "Bootstrap идёт блоками по UTC-дням, поэтому сигналы одного рыночного движения не считаются полностью независимыми.",
     ]

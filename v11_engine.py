@@ -1,4 +1,4 @@
-"""Korkovts V11.4.1 Production decision engine.
+"""Korkovts V11.7.1 Production decision engine.
 
 The app.strategy module remains the signal generator. This module can only
 rank, downgrade, or suppress already-confirmed signals. It never fabricates a
@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Iterable
 
 from app.config import DATABASE_PATH
+from v1171_sqlite import db_session
 
 
 @dataclass(frozen=True)
@@ -104,14 +105,14 @@ def classify_regime(state) -> Regime:
 
 def _cohort_rows(signal, limit=150):
     try:
-        with sqlite3.connect(DATABASE_PATH,timeout=10) as c:
+        with db_session(timeout=10) as c:
             rows = c.execute(
                 """
                 SELECT pnl_r FROM signals
                 WHERE timeframe=? AND side=? AND COALESCE(setup_type,'')=?
                   AND closed_at IS NOT NULL AND activated_at IS NOT NULL
                   AND COALESCE(is_shadow,0)=0
-                  AND COALESCE(release_version,'') LIKE '11.4.1%'
+                  AND COALESCE(release_version,'') LIKE '11.7.1%'
                   AND result NOT IN ('ENTRY_EXPIRED','INVALIDATED')
                   AND COALESCE(result,'') NOT LIKE 'AMBIGUOUS%'
                   AND pnl_r IS NOT NULL
@@ -208,7 +209,8 @@ def evaluate(signal, regime=None) -> Metrics:
     spread = float(d.get("spread_bps", 999) or 999)
     cost_r = float(getattr(signal, "estimated_cost_r", 999) or 999)
     adl = str(getattr(signal, "adl_risk", d.get("adl_risk", "unknown")) or "unknown").lower()
-    adl_age = float(d.get("adl_age_minutes", 9999) or 9999)
+    _adl_age=d.get("adl_age_minutes")
+    adl_age = float(_adl_age) if _adl_age is not None else 9999.0
     impact_1k = float(getattr(signal, "impact_1k_bps", 0) or 0)
     impact_5k = float(getattr(signal, "impact_5k_bps", 0) or 0)
     liquidity_unavailable = bool(getattr(signal, "liquidity_check_unavailable", False))
@@ -385,7 +387,7 @@ def select(signals: Iterable, max_results=4, regime=None):
 
 def init_rank_audit():
     try:
-        with sqlite3.connect(DATABASE_PATH,timeout=10) as c:
+        with db_session(timeout=10) as c:
             c.execute("""
                 CREATE TABLE IF NOT EXISTS v11_rank_audit(
                     signal_id INTEGER PRIMARY KEY,
@@ -402,7 +404,7 @@ def init_rank_audit():
 def record_rank_audit(signal_id, signal):
     init_rank_audit()
     try:
-        with sqlite3.connect(DATABASE_PATH,timeout=10) as c:
+        with db_session(timeout=10) as c:
             c.execute(
                 """INSERT OR REPLACE INTO v11_rank_audit
                    (signal_id,champion_rank,challenger_rank,grade)
@@ -421,7 +423,7 @@ def record_rank_audit(signal_id, signal):
 def challenger_summary():
     init_rank_audit()
     try:
-        with sqlite3.connect(DATABASE_PATH,timeout=10) as c:
+        with db_session(timeout=10) as c:
             row = c.execute("""
                 SELECT COUNT(*),
                        SUM(CASE WHEN s.status='CLOSED'
@@ -434,7 +436,7 @@ def challenger_summary():
                                 THEN s.pnl_r END)
                 FROM v11_rank_audit a
                 JOIN signals s ON s.id=a.signal_id
-                WHERE COALESCE(s.release_version,'') LIKE '11.4.1%'
+                WHERE COALESCE(s.release_version,'') LIKE '11.7.1%'
             """).fetchone()
         return {
             "audited": int(row[0] or 0),

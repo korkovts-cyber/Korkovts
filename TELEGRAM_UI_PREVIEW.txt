@@ -1,0 +1,41 @@
+YK CRYPTO SIGNAL AI — V11.13.0 GLOBAL INTELLIGENCE
+
+Telegram PRIME example:
+
+🏆 YK PRIME · №1 ОСНОВНАЯ СДЕЛКА
+━━━━━━━━━━━━━━━━━━━━
+ETHUSDT · 🟢 LONG · 1H
+💎 A+ · PRO 93 · PRIORITY 94
+🧮 Robust Net-R / LCB90 / forward sample
+
+⚡ СТАТУС
+│ 🟡 ARMED · READY 1/2
+│ НЕ ВХОДИТЬ СЕЙЧАС — ждём второй независимый micro-trigger
+
+🎯 ТОРГОВЫЙ ПЛАН
+ENTRY   ...
+STOP    ...
+TP1/2/3 ...
+
+🧠 INTELLIGENCE
+• HTF / derivatives / OI / funding / crowding
+• Futures L2 + taker-flow persistence
+• data coherence / protection guard
+• Global News Intelligence context
+
+When 2/2 is confirmed:
+🚨 ENTRY NOW — ВХОД РАЗРЕШЁН СЕЙЧАС
+
+Breaking-news example:
+🚨 GLOBAL / CRYPTO SHOCK
+<headline>
+🧠 NEWS INTELLIGENCE
+Категория / гипотеза / confidence / corroboration
+⚠️ По одному заголовку не входить.
+🔎 Immediate 15M/1H re-check starts; ENTRY NOW is sent separately only after market confirmation.
+
+AUTO:
+- 10m MAIN market status even with no entry
+- 60s Fast Radar
+- 30s ENTRY NOW monitor
+- 60s news/global shock radar

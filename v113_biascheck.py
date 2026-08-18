@@ -1,4 +1,4 @@
-"""Synthetic lookahead / recursive indicator self-test for V11.4.1.
+"""Synthetic lookahead / recursive indicator self-test for V11.7.1.
 
 This does not replace historical walk-forward testing. It is a deterministic
 startup guard against two implementation errors:
@@ -120,6 +120,6 @@ if __name__=="__main__":
     result=run()
     if not result["lookahead_ok"] or not result["recursive_ok"]:
         raise SystemExit(
-            "V11.4 INDICATOR SELF-TEST FAILED:\n- "+"\n- ".join(result["issues"])
+            "V11.7.1 INDICATOR SELF-TEST FAILED:\n- "+"\n- ".join(result["issues"])
         )
-    print("V11.4 INDICATOR SELF-TEST: OK")
+    print("V11.7.1 INDICATOR SELF-TEST: OK")

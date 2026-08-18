@@ -1,4 +1,4 @@
-"""Concurrency-safe news failover for V11.4.1.
+"""Concurrency-safe news failover for V11.7.1.
 
 Each scan owns a mutable context object stored in a ContextVar. asyncio child
 tasks inherit the same object reference, so a news-fetch task can update the
@@ -76,7 +76,7 @@ async def safe_fetch(fetcher,*args,**kwargs):
     except Exception as exc:
         reason=f"{type(exc).__name__}: {exc}"
         total=0
-        log.warning("V11.4.1 news degraded: %s",reason)
+        log.warning("V11.7.1 news degraded: %s",reason)
 
     value={"checked":True,"degraded":True,"reason":reason,
            "changed_at":time.time(),"healthy_sources":0}

@@ -1,0 +1,40 @@
+CONTROL AUDIT · V11.13.0 GLOBAL INTELLIGENCE
+
+Verified locally after the final code changes:
+- 110/110 locally runnable focused tests PASS.
+- ResourceWarning promoted to error: PASS.
+- V11.11, V11.12, V11.12.1, V11.12.2 and V11.13 source release checks: PASS.
+- Python compileall: PASS.
+- 85 Python files parse through AST: PASS.
+- duplicate top-level function/class definitions: 0.
+- third-party dependency roots: feedparser/httpx/numpy/pandas/telegram/websockets; all covered by the pinned requirements.txt.
+- literal callback_data >64 bytes: 0.
+- secret/token/private-key scan: performed again before final ZIP.
+
+AUTO / ENTRY
+- 10m mandatory MAIN status: source contract verified.
+- verified no-signal vs health/data pause: separated.
+- 60s Fast Radar: 15M + 1H paths, max two candidates/cycle.
+- 30s ENTRY monitor: preserved.
+- geometry refresh resets 2/2 streak: SQLite integration tested.
+- immediate ENTRY delivery still goes through Production pipeline + L2/flow + durable delivery claim.
+- Prime label lock prevents multiple #1 labels in one burst.
+
+NEWS / GLOBAL SHOCK
+- independent crypto and macro/world branches with failure isolation.
+- official-source trust is not inherited by X/social posts.
+- same-event corroboration required.
+- zero-minute freshness bug corrected.
+- empty RSS response is unhealthy.
+- ambiguous shock: 3-minute fail-closed discovery, then neutral headline direction.
+- directional news remains only a catalyst; headline alone never bypasses market/ENTRY gates.
+- heavy breaking-news re-scan is detached from the news watcher lock.
+
+REPOSITORY-DEPENDENT GATE
+- V11.13 remains an overlay and intentionally does not contain app/.
+- Current GitHub main app/ blob hashes were checked against the pinned V11.10 base contract during this audit.
+- test_v11100_core.py: 16 methods; not claimed as locally executed without exact app/ filesystem.
+- test_v11100.py: 214 methods; not claimed as locally executed without exact app/ filesystem.
+- Railway startup contains 340 total test methods and will not start bot_v11130.py unless the pinned app/, dependency lock, all tests and all release checks pass.
+
+No audit can guarantee profitable market outcomes; this audit verifies software and safety contracts, not future price direction.

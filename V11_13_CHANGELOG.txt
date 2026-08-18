@@ -1,0 +1,23 @@
+KORKOVTS SIGNAL AI V11.13.0 · GLOBAL INTELLIGENCE
+
+Major changes from V11.12.2 AUTO PULSE
+- Global Macro & Shock Radar added without allowing headline-only trades.
+- Added BLS / ECB / CFTC / BBC World & Business feed branch with independent failover.
+- Event taxonomy + directional hypothesis for macro, regulation, hacks, stablecoins, exchange incidents, geopolitical/trade/energy/market-stress shocks.
+- 3-minute fail-closed discovery window for ambiguous breaking events.
+- X/social primary-source trust bug fixed: social never inherits official-source trust.
+- Corroboration tightened to the same event using category/assets/title-token similarity.
+- Source onboarding guard prevents historical alert burst after deployment.
+- Empty/invalid RSS feed is no longer counted as healthy.
+- Crypto and global feed branches fetch concurrently; one branch can fail without cancelling the other.
+- News watcher no longer holds its lock while heavy 15M/1H rescans run.
+- Breaking assets receive Fast Radar priority; global shock prioritises BTC/ETH.
+- Fast Radar now covers both 15M and 1H within the same max-2-candidates/minute budget.
+- READY 2/2 confirmation is reset after material Entry/Stop/TP geometry change.
+- Freshness age=0 handling corrected for news, live flow and ADL.
+- Mandatory AUTO heartbeat distinguishes a verified no-signal market from safety/data pause.
+- AUTO heartbeat HTML error text is escaped.
+- Prime Label Lock: only the strongest candidate in a burst may be displayed as #1.
+- User-visible version labels updated to V11.13.0.
+
+Trading strategy cohort stays intentionally unchanged so forward statistics remain comparable.

@@ -1,0 +1,19 @@
+Korkovts Signal AI V11.12.2 · AUTO PULSE
+
+1. Futures AUTO full scan is pinned to exactly 10 minutes.
+2. The MAIN AUTO cycle now always sends one Telegram status message every 10 minutes:
+   - explicit NO ENTRY SIGNAL when no trade is ready;
+   - scan/data failure status when a mandatory source fails;
+   - immediate-entry count when ENTRY NOW fired during the cycle.
+3. The offset 15M AUTO cycle stays silent when there is no trade, preventing a second no-signal message 5 minutes later.
+4. Existing ENTRY NOW monitor remains at 30 seconds. A confirmed signal is delivered immediately when the 2/2 persistence gate passes; it does not wait for the next 10-minute cycle.
+5. Added Fast Radar every 60 seconds. It only selects at most 2 symbols for focused re-analysis using:
+   - near-candidates from the last full scan;
+   - fresh liquid ticker impulses.
+   Fast Radar never sends a trade itself and never bypasses the full Production stack.
+6. Fast Radar candidate must still pass _prepare(), execution revalidation, evidence/meta/protection, L2/flow, cooldown and ENTRY NOW 2/2.
+7. AUTO system diagnostics now show Fast Radar health/check/armed counts.
+8. Fixed release-chain compatibility so older V11.11/V11.12 source checks accept a newer V11.12.x runtime instead of blocking deployment.
+9. Preserved V11.12 fail-closed L2, flow persistence, spread shock, liquidity pull, cross-feed coherence, tape/replay, singleton and delivery safety.
+
+No profit is guaranteed; this update improves monitoring latency and observability without weakening entry quality gates.

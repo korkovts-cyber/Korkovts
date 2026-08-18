@@ -1,4 +1,4 @@
-"""Execution and L2-liquidity features for V11.4.1.
+"""Execution and L2-liquidity features for V11.7.1.
 
 A single Binance depth snapshot is reused for market-impact and order-book
 state metrics. The strategy never gets a signal from this module; it can only

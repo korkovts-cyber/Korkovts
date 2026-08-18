@@ -1,4 +1,4 @@
-"""SQLite production hardening for V11.4.1.
+"""SQLite production hardening for V11.7.1.
 
 Why:
 - the bot has several concurrent readers/writers (tracker, Telegram outbox,
@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -23,6 +24,21 @@ from app.config import DATABASE_PATH
 _original_connect=sqlite3.connect
 _installed=False
 _lock=threading.Lock()
+
+
+class _ClosingConnection(sqlite3.Connection):
+    """Preserve sqlite context semantics but also close on context exit.
+
+    The upstream app.db uses ``with sqlite3.connect(...)`` extensively. Native
+    sqlite3 commits/rolls back there but leaves the handle open. Installing this
+    as the default factory makes those legacy contexts deterministic without
+    rewriting the connected repository's app/ package.
+    """
+    def __exit__(self,exc_type,exc,tb):
+        try:
+            return super().__exit__(exc_type,exc,tb)
+        finally:
+            self.close()
 
 
 def _configure_connection(conn):
@@ -35,6 +51,8 @@ def _configure_connection(conn):
 
 
 def _connect(*args,**kwargs):
+    kwargs=dict(kwargs)
+    kwargs.setdefault("factory",_ClosingConnection)
     conn=_original_connect(*args,**kwargs)
     return _configure_connection(conn)
 
@@ -47,11 +65,24 @@ def install_connect_wrapper():
     _installed=True
 
 
+@contextmanager
+def _session(connect_fn,*args,**kwargs):
+    conn=connect_fn(*args,**kwargs)
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def harden_database():
     """Enable persistent WAL and validate that the DB is writable."""
     path=Path(DATABASE_PATH)
     path.parent.mkdir(parents=True,exist_ok=True)
-    with _original_connect(DATABASE_PATH,timeout=10) as c:
+    with _session(_original_connect,DATABASE_PATH,timeout=10) as c:
         c.execute("PRAGMA busy_timeout=10000")
         journal=str(c.execute("PRAGMA journal_mode=WAL").fetchone()[0]).lower()
         c.execute("PRAGMA synchronous=NORMAL")
@@ -63,9 +94,9 @@ def harden_database():
             release TEXT
         )""")
         c.execute("""INSERT INTO v114_db_health(id,touched_at,release)
-            VALUES(1,CURRENT_TIMESTAMP,'11.4')
+            VALUES(1,CURRENT_TIMESTAMP,'11.7.1')
             ON CONFLICT(id) DO UPDATE SET
-              touched_at=CURRENT_TIMESTAMP,release='11.4'""")
+              touched_at=CURRENT_TIMESTAMP,release='11.7.1'""")
         quick=c.execute("PRAGMA quick_check").fetchone()
         if journal!="wal":
             raise RuntimeError(f"SQLite WAL not enabled: {journal}")
@@ -76,7 +107,7 @@ def harden_database():
 
 
 def checkpoint():
-    with sqlite3.connect(DATABASE_PATH,timeout=10) as c:
+    with _session(sqlite3.connect,DATABASE_PATH,timeout=10) as c:
         row=c.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
     return row
 
@@ -97,8 +128,8 @@ def backup_if_due(keep=7):
         folder.mkdir(parents=True,exist_ok=True)
         target=folder/f"signals-{day}.db"
         if not target.exists():
-            with sqlite3.connect(DATABASE_PATH,timeout=10) as src:
-                with _original_connect(str(target),timeout=10) as dst:
+            with _session(sqlite3.connect,DATABASE_PATH,timeout=10) as src:
+                with _session(_original_connect,str(target),timeout=10) as dst:
                     src.backup(dst)
                     check=dst.execute("PRAGMA quick_check").fetchone()
                     if not check or str(check[0]).lower()!="ok":
@@ -114,7 +145,7 @@ def backup_if_due(keep=7):
 
 def status():
     try:
-        with sqlite3.connect(DATABASE_PATH,timeout=10) as c:
+        with _session(sqlite3.connect,DATABASE_PATH,timeout=10) as c:
             journal=str(c.execute("PRAGMA journal_mode").fetchone()[0]).lower()
             busy=int(c.execute("PRAGMA busy_timeout").fetchone()[0])
             quick=str(c.execute("PRAGMA quick_check").fetchone()[0])
