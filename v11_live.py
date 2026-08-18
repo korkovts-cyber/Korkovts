@@ -96,9 +96,14 @@ async def monitor():
     global _connected,_reconnects,_symbols
     backoff=1
     while True:
-        current=desired_symbols()
-        _symbols=current
         try:
+            try:
+                current=desired_symbols()
+            except Exception as exc:
+                # Database/transient read failures must not kill the live task.
+                log.warning("V11 websocket symbol refresh failed, BTC fallback: %s",exc)
+                current=("BTCUSDT",)
+            _symbols=current
             async with connect(
                 _url(current),
                 open_timeout=10,

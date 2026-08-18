@@ -1,4 +1,4 @@
-"""Production data-health guard for V11.2.1."""
+"""Production data-health guard for V11.4.1 PRECISION AUDIT."""
 
 from __future__ import annotations
 
@@ -55,12 +55,35 @@ def classify(rest_ok,latency_ms,candle_age_sec,clock_skew_ms,ws_connected,ws_age
 
 
 def _db_health():
+    """Verify not only that SQLite opens, but that the production signal schema exists."""
     persistent=str(DATABASE_PATH).startswith("/data/")
+    required={
+        "id","symbol","timeframe","side","score","status","result","pnl_r",
+        "strategy_version","setup_type","feature_json","release_version",
+        "is_shadow","shadow_reason","delivery_state","delivered_at",
+    }
     try:
         parent=os.path.dirname(DATABASE_PATH) or "."
         os.makedirs(parent,exist_ok=True)
         with sqlite3.connect(DATABASE_PATH,timeout=3) as c:
+            c.execute("PRAGMA busy_timeout=10000")
             c.execute("SELECT 1").fetchone()
+            table=c.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='signals'"
+            ).fetchone()
+            if not table:
+                return False,persistent
+            columns={row[1] for row in c.execute("PRAGMA table_info(signals)").fetchall()}
+            if not required.issubset(columns):
+                return False,persistent
+            # Verify this filesystem is actually writable, without touching
+            # strategy tables or production statistics.
+            c.execute("""CREATE TABLE IF NOT EXISTS v112_health_probe(
+                id INTEGER PRIMARY KEY CHECK(id=1), touched_at TEXT)""")
+            c.execute("""INSERT INTO v112_health_probe(id,touched_at)
+                VALUES(1,CURRENT_TIMESTAMP)
+                ON CONFLICT(id) DO UPDATE SET touched_at=CURRENT_TIMESTAMP""")
+            c.execute("SELECT touched_at FROM v112_health_probe WHERE id=1").fetchone()
         return True,persistent
     except Exception:
         return False,persistent

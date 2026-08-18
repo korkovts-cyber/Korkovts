@@ -1,4 +1,4 @@
-"""Korkovts V11 Production decision engine.
+"""Korkovts V11.4.1 Production decision engine.
 
 The app.strategy module remains the signal generator. This module can only
 rank, downgrade, or suppress already-confirmed signals. It never fabricates a
@@ -80,8 +80,13 @@ def classify_regime(state) -> Regime:
     dispersion = float(breadth.get("dispersion", 0) or 0)
     blocked = bool(state.get("breadth_blocked"))
 
+    # Do not freeze the whole market merely because volatility is high:
+    # strong trends often live in high-volatility regimes. Hard pause is
+    # reserved for genuinely extreme/chaotic combinations.
+    if atr >= 3.5 or (atr >= 2.5 and dispersion >= 8.0):
+        return Regime("SHOCK", 10.0, "экстремальная волатильность и разброс", True)
     if atr >= 2.5:
-        return Regime("SHOCK", 10.0, "экстремальная волатильность BTC", True)
+        return Regime("EXTREME_VOL", 8.0, "очень высокая волатильность BTC")
     if dispersion >= 9.0:
         return Regime("HIGH_DISPERSION", 7.0, "аномально широкий разброс альткоинов")
     if blocked:
@@ -99,14 +104,16 @@ def classify_regime(state) -> Regime:
 
 def _cohort_rows(signal, limit=150):
     try:
-        with sqlite3.connect(DATABASE_PATH) as c:
+        with sqlite3.connect(DATABASE_PATH,timeout=10) as c:
             rows = c.execute(
                 """
                 SELECT pnl_r FROM signals
                 WHERE timeframe=? AND side=? AND COALESCE(setup_type,'')=?
                   AND closed_at IS NOT NULL AND activated_at IS NOT NULL
                   AND COALESCE(is_shadow,0)=0
+                  AND COALESCE(release_version,'') LIKE '11.4.1%'
                   AND result NOT IN ('ENTRY_EXPIRED','INVALIDATED')
+                  AND COALESCE(result,'') NOT LIKE 'AMBIGUOUS%'
                   AND pnl_r IS NOT NULL
                 ORDER BY closed_at DESC LIMIT ?
                 """,
@@ -158,19 +165,27 @@ def drift_stats(signal, recent_n=20, baseline_n=80) -> Drift:
 
     penalty = 0.0
     label = "стабильно"
-    if len(recent) >= 15:
-        collapse = recent_exp < -.15 or recent_pf < .75
+
+    # "Drift" means deterioration relative to a meaningful prior baseline.
+    # A small bad sample without a baseline must not disable a setup.
+    enough_recent = len(recent) >= 20
+    enough_baseline = len(baseline) >= 30
+    if enough_recent and enough_baseline:
+        prior_worked = base_exp >= .08 and base_pf >= 1.10
+        collapse = recent_exp < -.15 and recent_pf < .80
         meaningful_drop = (
-            baseline
-            and recent_exp < base_exp - .30
-            and recent_pf < max(1.0, base_pf * .65)
+            recent_exp < base_exp - .30
+            and recent_pf < max(1.0, base_pf * .70)
         )
-        if collapse:
+        if prior_worked and collapse:
             penalty = 8.0; label = "DRIFT: edge резко ухудшился"
         elif meaningful_drop:
             penalty = 5.0; label = "DRIFT: заметное ухудшение"
         elif recent_exp < 0 or recent_pf < 1:
             penalty = 3.0; label = "слабая последняя выборка"
+    elif enough_recent and (recent_exp < 0 or recent_pf < 1):
+        penalty = 2.0
+        label = "последняя выборка слабая; baseline ещё мал"
 
     return Drift(
         len(recent), len(baseline), recent_exp, base_exp,
@@ -195,6 +210,8 @@ def evaluate(signal, regime=None) -> Metrics:
     adl = str(getattr(signal, "adl_risk", d.get("adl_risk", "unknown")) or "unknown").lower()
     adl_age = float(d.get("adl_age_minutes", 9999) or 9999)
     impact_1k = float(getattr(signal, "impact_1k_bps", 0) or 0)
+    impact_5k = float(getattr(signal, "impact_5k_bps", 0) or 0)
+    liquidity_unavailable = bool(getattr(signal, "liquidity_check_unavailable", False))
     event_risk = float(news.get("event_risk", 0) or 0)
 
     issues = []
@@ -211,6 +228,10 @@ def evaluate(signal, regime=None) -> Metrics:
         eligible = False; issues.append("ADL stale")
     if impact_1k > 10:
         eligible = False; issues.append(f"$1k impact {impact_1k:.1f}bps")
+    if impact_5k > 35:
+        eligible = False; issues.append(f"$5k impact {impact_5k:.1f}bps")
+    if liquidity_unavailable:
+        issues.append("deep liquidity unavailable")
     if regime.hard_pause:
         eligible = False; issues.append("market shock pause")
 
@@ -223,7 +244,9 @@ def evaluate(signal, regime=None) -> Metrics:
         100
         - 4 * max(0, spread)
         - 80 * max(0, cost_r)
-        - 2.5 * max(0, impact_1k)
+        - 2.2 * max(0, impact_1k)
+        - .35 * max(0, impact_5k)
+        - (8 if liquidity_unavailable else 0)
     )
     regime_quality = clamp(100 - regime.penalty * 2 - (4 if event_risk >= .67 else 0))
 
@@ -362,7 +385,7 @@ def select(signals: Iterable, max_results=4, regime=None):
 
 def init_rank_audit():
     try:
-        with sqlite3.connect(DATABASE_PATH) as c:
+        with sqlite3.connect(DATABASE_PATH,timeout=10) as c:
             c.execute("""
                 CREATE TABLE IF NOT EXISTS v11_rank_audit(
                     signal_id INTEGER PRIMARY KEY,
@@ -379,7 +402,7 @@ def init_rank_audit():
 def record_rank_audit(signal_id, signal):
     init_rank_audit()
     try:
-        with sqlite3.connect(DATABASE_PATH) as c:
+        with sqlite3.connect(DATABASE_PATH,timeout=10) as c:
             c.execute(
                 """INSERT OR REPLACE INTO v11_rank_audit
                    (signal_id,champion_rank,challenger_rank,grade)
@@ -398,17 +421,20 @@ def record_rank_audit(signal_id, signal):
 def challenger_summary():
     init_rank_audit()
     try:
-        with sqlite3.connect(DATABASE_PATH) as c:
+        with sqlite3.connect(DATABASE_PATH,timeout=10) as c:
             row = c.execute("""
                 SELECT COUNT(*),
                        SUM(CASE WHEN s.status='CLOSED'
                                  AND s.result NOT IN ('ENTRY_EXPIRED','INVALIDATED')
+                                 AND COALESCE(s.result,'') NOT LIKE 'AMBIGUOUS%'
                                 THEN 1 ELSE 0 END),
                        AVG(CASE WHEN s.status='CLOSED'
                                  AND s.result NOT IN ('ENTRY_EXPIRED','INVALIDATED')
+                                 AND COALESCE(s.result,'') NOT LIKE 'AMBIGUOUS%'
                                 THEN s.pnl_r END)
                 FROM v11_rank_audit a
                 JOIN signals s ON s.id=a.signal_id
+                WHERE COALESCE(s.release_version,'') LIKE '11.4.1%'
             """).fetchone()
         return {
             "audited": int(row[0] or 0),

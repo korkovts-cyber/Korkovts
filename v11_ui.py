@@ -12,19 +12,41 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from app.config import DATABASE_PATH
 from v11_engine import challenger_summary
 from v11_live import health as live_health
-from v11_manager import lifecycle_status
+from v11_manager import lifecycle_status, lifecycle_status_by_id
+from v112_details import signal_row, snapshot_row
 
 
-def signal_actions(symbol):
-    s=str(symbol).upper()
+def signal_actions(symbol=None,timeframe=None,signal_id=None,snapshot_id=None):
+    if signal_id is not None:
+        ref=f"v11i"
+        ident=str(int(signal_id))
+    elif snapshot_id is not None:
+        ref=f"v11s"
+        ident=str(int(snapshot_id))
+    else:
+        s=str(symbol or "").upper()
+        tf=str(timeframe or "").upper()
+        suffix=f":{tf}" if tf else ""
+        return InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🔍 Почему?",callback_data=f"v11:why:{s}{suffix}"),
+                InlineKeyboardButton("🛡 Риск",callback_data=f"v11:risk:{s}{suffix}"),
+            ],
+            [
+                InlineKeyboardButton("📊 Статистика",callback_data=f"v11:stats:{s}{suffix}"),
+                InlineKeyboardButton("🔄 Статус сделки",callback_data=f"v11:life:{s}{suffix}"),
+            ],
+            [InlineKeyboardButton("🏠 ГЛАВНОЕ МЕНЮ",callback_data="v11:menu")],
+        ])
+
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🔍 Почему?",callback_data=f"v11:why:{s}"),
-            InlineKeyboardButton("🛡 Риск",callback_data=f"v11:risk:{s}"),
+            InlineKeyboardButton("🔍 Почему?",callback_data=f"{ref}:why:{ident}"),
+            InlineKeyboardButton("🛡 Риск",callback_data=f"{ref}:risk:{ident}"),
         ],
         [
-            InlineKeyboardButton("📊 Статистика",callback_data=f"v11:stats:{s}"),
-            InlineKeyboardButton("🔄 Статус сделки",callback_data=f"v11:life:{s}"),
+            InlineKeyboardButton("📊 Статистика",callback_data=f"{ref}:stats:{ident}"),
+            InlineKeyboardButton("🔄 Статус сделки",callback_data=f"{ref}:life:{ident}"),
         ],
         [InlineKeyboardButton("🏠 ГЛАВНОЕ МЕНЮ",callback_data="v11:menu")],
     ])
@@ -40,10 +62,6 @@ def main_menu(analyze_symbol=None):
         coin=s.removesuffix("USDT")
         rows += [
             [InlineKeyboardButton(f"🔎 ПЕРЕПРОВЕРИТЬ {coin}",callback_data=f"analyze:{s}")],
-            [
-                InlineKeyboardButton("🔍 Почему?",callback_data=f"v11:why:{s}"),
-                InlineKeyboardButton("🔄 Статус",callback_data=f"v11:life:{s}"),
-            ],
         ]
     rows += [
         [
@@ -66,6 +84,11 @@ def main_menu(analyze_symbol=None):
             InlineKeyboardButton("🧬 ФАКТОРЫ",callback_data="v112:lab"),
             InlineKeyboardButton("📡 HEALTH",callback_data="v112:health"),
         ],
+        [
+            InlineKeyboardButton("🎯 PRECISION",callback_data="v113:meta"),
+            InlineKeyboardButton("🧪 ROBUST",callback_data="v113:robust"),
+        ],
+        [InlineKeyboardButton("🎯 ENTRY QUALITY",callback_data="v114:entry")],
         [InlineKeyboardButton("🧹 ОЧИСТИТЬ ЧАТ",callback_data="clear_chat")],
     ]
     return InlineKeyboardMarkup(rows)
@@ -96,12 +119,23 @@ def card(s,priority=False):
     fresh=float(getattr(s,"alpha_fresh_score",0) or 0)
     mom=float(getattr(s,"alpha_momentum_percentile",50) or 50)
     ofi=float(getattr(s,"alpha_ofi_5m",0) or 0)
+    residual=float(getattr(s,"alpha_residual_pct",getattr(s,"alpha_residual_6h_pct",0)) or 0)
+    residual_horizon=str(getattr(s,"alpha_residual_horizon","6h") or "6h")
+    l2_state=str(getattr(s,"l2_state","—") or "—")
+    l2_imb=float(getattr(s,"l2_signed_imbalance_10",0) or 0)
+    micro=str(getattr(s,"micro_label","—") or "—")
+    meta_status=str(getattr(s,"meta_status","LEARNING") or "LEARNING")
+    meta_score=float(getattr(s,"meta_score",.5) or .5)
 
-    cluster=(
-        f"#{getattr(s,'cluster_id',0)} · лидер"
-        if int(getattr(s,"cluster_rank",1) or 1)==1 else
-        f"#{getattr(s,'cluster_id',0)} · коррелирующая альтернатива"
-    )
+    cluster_id=int(getattr(s,"cluster_id",0) or 0)
+    if not cluster_id:
+        cluster="независимый / кластер не определён"
+    else:
+        cluster=(
+            f"#{cluster_id} · лидер"
+            if int(getattr(s,"cluster_rank",1) or 1)==1 else
+            f"#{cluster_id} · коррелирующая альтернатива"
+        )
     history=""
     if sample:
         pf=float(getattr(s,"cohort_pf",0) or 0)
@@ -126,20 +160,30 @@ def card(s,priority=False):
         f"📡 Data <b>{health:.0f}</b> · Execution <b>{exe:.0f}</b> · $1k impact <b>{impact_text}</b>"
         f"{history}\n"
         f"🧬 Drift: <b>{escape(drift)}</b>\n"
-        f"🧠 Alpha: <b>{alpha:+.1f}</b> <i>(raw {alpha_raw:+.1f})</i> · Fresh <b>{fresh:.0f}</b> · RelMom <b>{mom:.0f}p</b> · OFI5m <b>{ofi:+.0%}</b>\n\n"
+        f"🧠 Alpha: <b>{alpha:+.1f}</b> <i>(raw {alpha_raw:+.1f})</i> · Fresh <b>{fresh:.0f}</b> · RelMom <b>{mom:.0f}p</b>\n"
+        f"🌊 OFI closed-5m <b>{ofi:+.0%}</b> · BTC residual {escape(residual_horizon)} <b>{residual:+.2f}%</b>\n"
+        f"📚 L2 <b>{escape(l2_state)}</b> · signed imbalance <b>{l2_imb:+.0%}</b> · micro <b>{escape(micro)}</b>\n"
+        f"🎯 Meta <b>{escape(meta_status)}</b> · score <b>{meta_score:.2f}</b>\n\n"
         f"🕒 {escape(str(getattr(s,'expected_window','—')))} · пересмотр {escape(str(getattr(s,'review_window','—')))}\n"
         "⚠️ PRO — индекс качества условий, не вероятность прибыли."
     )
 
 
-def _latest(symbol):
+def _latest(symbol,timeframe=None):
     with sqlite3.connect(DATABASE_PATH) as c:
         c.row_factory=sqlite3.Row
-        row=c.execute("""
-            SELECT * FROM signals
-            WHERE symbol=? AND COALESCE(is_shadow,0)=0
-            ORDER BY id DESC LIMIT 1
-        """,(str(symbol).upper(),)).fetchone()
+        if timeframe:
+            row=c.execute("""
+                SELECT * FROM signals
+                WHERE symbol=? AND timeframe=? AND COALESCE(is_shadow,0)=0
+                ORDER BY id DESC LIMIT 1
+            """,(str(symbol).upper(),str(timeframe).upper())).fetchone()
+        else:
+            row=c.execute("""
+                SELECT * FROM signals
+                WHERE symbol=? AND COALESCE(is_shadow,0)=0
+                ORDER BY id DESC LIMIT 1
+            """,(str(symbol).upper(),)).fetchone()
     return dict(row) if row else None
 
 
@@ -148,8 +192,8 @@ def _feature(row):
     except Exception: return {}
 
 
-def why_text(symbol):
-    row=_latest(symbol)
+def why_text(symbol,timeframe=None):
+    row=_latest(symbol,timeframe)
     if not row:
         return "⚪ Детали этого сигнала ещё не сохранены."
     f=_feature(row); t=f.get("technical",{}) or {}; d=f.get("derivatives",{}) or {}; v=f.get("v11",{}) or {}
@@ -183,28 +227,49 @@ def why_text(symbol):
     if alpha:
         lines += [
             "",
-            "<b>Alpha V11.1</b>",
+            "<b>Alpha V11.4</b>",
             f"Fresh <b>{float(alpha.get('fresh_score',0)):.0f}/100</b> · RelMom <b>{float(alpha.get('momentum_percentile',50)):.0f}p</b>",
-            f"OFI 1m/5m <b>{float(alpha.get('ofi_1m',0)):+.0%}/{float(alpha.get('ofi_5m',0)):+.0%}</b>",
-            f"BTC residual 6h <b>{float(alpha.get('residual_6h_pct',0)):+.2f}%</b> · beta <b>{float(alpha.get('beta',1)):.2f}</b>",
+            f"OFI recent/closed-5m <b>{float(alpha.get('ofi_recent',alpha.get('ofi_1m',0))):+.0%}/{float(alpha.get('ofi_5m',0)):+.0%}</b>",
+            f"Agg sample coverage <b>{float(alpha.get('agg_coverage_sec',0)):.0f}s</b>",
+            f"BTC residual {escape(str(alpha.get('residual_horizon','6h')))} <b>{float(alpha.get('residual_pct',alpha.get('residual_6h_pct',0))):+.2f}%</b> · beta <b>{float(alpha.get('beta',1)):.2f}</b>",
             f"Корректировка: <b>{float(alpha.get('weighted_adjustment',alpha.get('raw_adjustment',alpha.get('adjustment',0)))):+.1f}</b>",
             f"Факторы: <b>{escape(', '.join(map(str,alpha.get('notes') or [])) or 'нейтрально')}</b>",
+        ]
+    l2=f.get("execution_v113") or {}
+    micro=f.get("micro_v113") or {}
+    meta=f.get("meta_v113") or {}
+    if l2:
+        lines += [
+            "",
+            "<b>L2 state</b>",
+            f"State <b>{escape(str(l2.get('l2_state','—')))}</b> · signed imbalance <b>{float(l2.get('signed_imbalance_10bps',0)):+.0%}</b>",
+            f"Microprice <b>{float(l2.get('signed_microprice_bias_bps',0)):+.2f}bps</b> · depth10 <b>${float(l2.get('depth_10bps_usd',0)):,.0f}</b>",
+        ]
+    if micro:
+        lines += [f"Micro decision <b>{escape(str(micro.get('label','—')))}</b> · adjustment <b>{float(micro.get('adjustment',0)):+.1f}</b>"]
+    if meta:
+        lines += [
+            "",
+            "<b>Meta Precision</b>",
+            f"Status <b>{escape(str((meta.get('report') or {}).get('status','LEARNING')))}</b> · score <b>{float(meta.get('score',.5)):.2f}</b>",
+            f"Gate <b>{float(meta.get('threshold',.60)):.2f}</b> · active <b>{'YES' if meta.get('ready') else 'NO'}</b>",
         ]
     return "\n".join(lines)
 
 
-def risk_text(symbol):
-    row=_latest(symbol)
+def risk_text(symbol,timeframe=None):
+    row=_latest(symbol,timeframe)
     if not row: return "⚪ Риск-данные сигнала ещё не сохранены."
     f=_feature(row); v=f.get("v11",{}) or {}; d=f.get("derivatives",{}) or {}
+    execution=f.get("execution_v113") or f.get("execution_v1121",{}) or {}
     issues=v.get("issues") or []
     return "\n".join([
         f"🛡 <b>РИСК · {escape(str(row['symbol']))}</b>",
         "━━━━━━━━━━━━━━━━━━",
         f"Data Health: <b>{float(v.get('data_health',0)):.0f}/100</b>",
         f"Execution: <b>{float(v.get('execution_quality',0)):.0f}/100</b>",
-        f"$1k impact: <b>{float(v.get('impact_1k_bps',0)):.1f}bps</b>",
-        f"$5k impact: <b>{float(v.get('impact_5k_bps',0)):.1f}bps</b>",
+        f"$1k impact: <b>{'н/д' if execution.get('liquidity_check_unavailable') else f'{float(v.get("impact_1k_bps",0)):.1f}bps'}</b>",
+        f"$5k impact: <b>{'н/д' if execution.get('liquidity_check_unavailable') else f'{float(v.get("impact_5k_bps",0)):.1f}bps'}</b>",
         f"Spread: <b>{float(d.get('spread_bps',0)):.2f}bps</b>",
         f"ADL: <b>{escape(str(d.get('adl_risk','—')).upper())}</b>",
         f"Флаги: <b>{escape(', '.join(map(str,issues)) if issues else 'нет критических')}</b>",
@@ -213,8 +278,8 @@ def risk_text(symbol):
     ])
 
 
-def stats_text(symbol):
-    row=_latest(symbol)
+def stats_text(symbol,timeframe=None):
+    row=_latest(symbol,timeframe)
     if not row: return "⚪ Статистика сетапа пока недоступна."
     f=_feature(row); v=f.get("v11",{}) or {}
     cohort=v.get("cohort",{}) or {}; drift=v.get("drift",{}) or {}
@@ -236,8 +301,8 @@ def stats_text(symbol):
     ])
 
 
-def life_text(symbol):
-    data=lifecycle_status(symbol)
+def life_text(symbol,timeframe=None):
+    data=lifecycle_status(symbol,timeframe)
     if not data: return "⚪ Сигнал для этого символа не найден."
     s=data["signal"]; l=data["live"]
     status=str(s.get("status") or "—")
@@ -257,6 +322,106 @@ def life_text(symbol):
         if l.get("last_event"): lines.append(f"Последнее событие: <b>{escape(str(l['last_event']))}</b>")
     if s.get("pnl_r") is not None: lines.append(f"Forward-test: <b>{float(s['pnl_r']):+.2f}R</b>")
     return "\n".join(lines)
+
+
+def _why_from_row(row):
+    if not row: return "⚪ Детали сигнала не найдены."
+    f=_feature(row); t=f.get("technical",{}) or {}; d=f.get("derivatives",{}) or {}; v=f.get("v11",{}) or {}
+    lines=[
+        f"🔍 <b>ПОЧЕМУ {escape(str(row.get('symbol','?')))}</b> · {escape(str(row.get('timeframe','—')))}",
+        "━━━━━━━━━━━━━━━━━━",
+        f"Сценарий: <b>{escape(str(row.get('setup_type') or '—'))}</b>",
+        f"Направление: <b>{escape(str(row.get('side') or '—'))}</b>",
+    ]
+    if t:
+        lines += ["", "<b>Техника</b>",
+                  f"ADX <b>{float(t.get('adx',0)):.1f}</b> · RSI <b>{float(t.get('rsi',0)):.1f}</b>",
+                  f"Efficiency <b>{float(t.get('efficiency20',0)):.2f}</b> · EMA20 distance <b>{float(t.get('distance_ema20_atr',0)):+.2f} ATR</b>"]
+    if d:
+        lines += ["", "<b>Деривативы</b>",
+                  f"OI Δ <b>{float(d.get('oi_change_pct',0)):+.2f}%</b> · taker <b>{float(d.get('taker_ratio',1)):.2f}</b>",
+                  f"Spread <b>{float(d.get('spread_bps',0)):.2f}bps</b> · basis <b>{float(d.get('basis_bps',0)):+.1f}bps</b>",
+                  f"ADL <b>{escape(str(d.get('adl_risk','—')).upper())}</b>"]
+    alpha=f.get("alpha_v112") or {}
+    if alpha:
+        lines += ["", "<b>Alpha V11.4</b>",
+                  f"Fresh <b>{float(alpha.get('fresh_score',0)):.0f}/100</b> · RelMom <b>{float(alpha.get('momentum_percentile',50)):.0f}p</b>",
+                  f"OFI recent/5m <b>{float(alpha.get('ofi_recent',0)):+.0%}/{float(alpha.get('ofi_5m',0)):+.0%}</b>",
+                  f"BTC residual {escape(str(alpha.get('residual_horizon','—')))} <b>{float(alpha.get('residual_pct',0)):+.2f}%</b>",
+                  f"Alpha adjustment <b>{float(alpha.get('weighted_adjustment',alpha.get('raw_adjustment',0))):+.1f}</b>"]
+    return "\n".join(lines)
+
+
+def _risk_from_row(row):
+    if not row: return "⚪ Риск-данные сигнала не найдены."
+    f=_feature(row); v=f.get("v11",{}) or {}; d=f.get("derivatives",{}) or {}; ex=f.get("execution_v113") or f.get("execution_v1121",{}) or {}
+    issues=v.get("issues") or []
+    unavailable=bool(ex.get("liquidity_check_unavailable"))
+    impact1="н/д" if unavailable else f"{float(v.get('impact_1k_bps',0)):.1f}bps"
+    impact5="н/д" if unavailable else f"{float(v.get('impact_5k_bps',0)):.1f}bps"
+    return "\n".join([
+        f"🛡 <b>РИСК · {escape(str(row.get('symbol','?')))}</b> · {escape(str(row.get('timeframe','—')))}",
+        "━━━━━━━━━━━━━━━━━━",
+        f"Data Health: <b>{float(v.get('data_health',0)):.0f}/100</b>",
+        f"Execution: <b>{float(v.get('execution_quality',0)):.0f}/100</b>",
+        f"$1k impact: <b>{impact1}</b> · $5k: <b>{impact5}</b>",
+        f"Spread: <b>{float(d.get('spread_bps',0)):.2f}bps</b>",
+        f"ADL: <b>{escape(str(d.get('adl_risk','—')).upper())}</b>",
+        f"L2: <b>{escape(str(ex.get('l2_state','—')))}</b> · signed imbalance <b>{float(ex.get('signed_imbalance_10bps',0)):+.0%}</b>",
+        f"Флаги: <b>{escape(', '.join(map(str,issues)) if issues else 'нет критических')}</b>",
+    ])
+
+
+def _stats_from_row(row):
+    if not row: return "⚪ Статистика сетапа не найдена."
+    f=_feature(row); v=f.get("v11",{}) or {}; cohort=v.get("cohort",{}) or {}; drift=v.get("drift",{}) or {}
+    pf=float(cohort.get("profit_factor",0) or 0); pf_text="∞" if pf>=999 else f"{pf:.2f}"
+    return "\n".join([
+        f"📊 <b>СТАТИСТИКА · {escape(str(row.get('symbol','?')))}</b> · {escape(str(row.get('timeframe','—')))}",
+        "━━━━━━━━━━━━━━━━━━",
+        f"{escape(str(row.get('side','—')))} · {escape(str(row.get('setup_type') or '—'))}",
+        f"Выборка: <b>{int(cohort.get('sample',0) or 0)}</b> · WR <b>{float(cohort.get('win_rate',0))*100:.0f}%</b>",
+        f"Expectancy <b>{float(cohort.get('expectancy_r',0)):+.2f}R</b> · PF <b>{pf_text}</b>",
+        f"Drift: <b>{escape(str(drift.get('label','нет данных')))}</b>",
+        f"Recent/Baseline Exp: <b>{float(drift.get('recent_expectancy',0)):+.2f}R / {float(drift.get('baseline_expectancy',0)):+.2f}R</b>",
+    ])
+
+
+def detail_by_signal_id(action,signal_id):
+    row=signal_row(signal_id)
+    if action=="why": return _why_from_row(row)
+    if action=="risk": return _risk_from_row(row)
+    if action=="stats": return _stats_from_row(row)
+    if action=="life":
+        data=lifecycle_status_by_id(signal_id)
+        if not data: return "⚪ Статус этого сигнала не найден."
+        s=data["signal"]; l=data["live"]
+        lines=[f"🔄 <b>СТАТУС · {escape(str(s['symbol']))}</b> · {escape(str(s['timeframe']))}",
+               "━━━━━━━━━━━━━━━━━━",f"Состояние: <b>{escape(str(s.get('status') or '—'))}</b>",
+               f"Результат: <b>{escape(str(s.get('result') or '—'))}</b>",
+               f"Entry: <b>{float(s.get('entry') or 0):.8g}</b>"]
+        if s.get("activated_at"): lines.append(f"Активирован: <b>{escape(str(s['activated_at'])[:19])}</b>")
+        if l:
+            if l.get("last_price") is not None: lines.append(f"Live: <b>{float(l['last_price']):.8g}</b>")
+            lines.append(f"Max R live: <b>{float(l.get('max_r') or 0):+.2f}R</b>")
+            lines.append(f"TP1: <b>{'ДА' if l.get('tp1_seen') else 'НЕТ'}</b> · TP2: <b>{'ДА' if l.get('tp2_seen') else 'НЕТ'}</b>")
+        if s.get("pnl_r") is not None: lines.append(f"Forward-test: <b>{float(s['pnl_r']):+.2f}R</b>")
+        return "\n".join(lines)
+    return "⚪ Неизвестный раздел."
+
+
+def detail_by_snapshot_id(action,snapshot_id):
+    row=snapshot_row(snapshot_id)
+    if not row: return "⚪ Снимок сигнала уже недоступен."
+    if action=="why": return _why_from_row(row)
+    if action=="risk": return _risk_from_row(row)
+    if action=="stats": return _stats_from_row(row)
+    if action=="life":
+        linked=row.get("_signal_id")
+        if linked:
+            return detail_by_signal_id("life",linked)
+        return "🔄 <b>ПОВТОРНЫЙ РУЧНОЙ АНАЛИЗ</b>\nЭтот снимок не является отдельной production-сделкой и не отслеживается как новая позиция."
+    return "⚪ Неизвестный раздел."
 
 
 def system_extra():

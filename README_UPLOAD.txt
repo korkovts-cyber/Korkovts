@@ -1,64 +1,118 @@
-KORKOVTS SIGNAL AI — V11.2.1 AUDITED
+KORKOVTS SIGNAL AI — V11.4.1 PRECISION AUDIT
 
-FINAL PRE-RELEASE AUDIT PACKAGE.
-Self-contained over the current app/ directory.
+UPLOAD ALL FILES IN THIS ARCHIVE TO THE REPOSITORY ROOT.
+Do not upload older V11.4 / V11.3 runtime files as replacements for these.
 
-UPLOAD TO REPOSITORY ROOT:
-- v11_engine.py
-- v11_liquidity.py
-- v11_live.py
-- v11_manager.py
-- v11_ui.py
-- v112_alpha.py
-- v112_lab.py
-- v112_health.py
-- bot_v1121.py
-- test_v1121.py
-- railway.toml
+RAILWAY START
+release_check_v1141.py -> test_v1141.py -> bot_v1141.py
 
-AUDIT FIXES
-1. Wider internal candidate pool.
-Core scanner now passes up to 8 already-qualified signals to Production.
-Telegram still publishes only max 4 (or configured neutral-mode max).
-This lets execution/liquidity/Alpha/portfolio ranking choose a genuinely better #1.
+WHAT V11.4.1 CHANGES
 
-2. Reduced Binance REST load.
-- one depth snapshot per symbol is reused for $1k and $5k impact;
-- one all-market ticker snapshot per Alpha batch;
-- one BTC candle snapshot per timeframe per Alpha batch;
-- explicit timeouts on extra Production calls.
+1. CONCURRENCY-SAFE NEWS FAILOVER
+Each scan owns a task-local mutable news context. Main, Short, manual /signal and
+news-triggered scans cannot leak HEALTHY/DEGRADED state into each other.
+When all real news sources fail:
+- directional news score is neutral
+- real_sources = 0
+- no headline/event is invented
+- the Binance scanner stays alive
+- Production quality threshold is +2 stricter
 
-3. Liquidity failure is no longer treated as zero slippage.
-Fallback is conservative and UI keeps it marked unavailable.
+2. FULL QUALIFIED REVALIDATION POOL
+Every candidate that already passed the core strategy, Production and Alpha
+layers goes through final exchange-metadata and execution revalidation.
+The old arbitrary top-12 execution cutoff is removed. Telegram is capped only
+AFTER final execution/meta/portfolio selection.
 
-4. WebSocket uses the explicit websockets 15 asyncio client API.
+3. TWO-SIDED EXECUTION COST
+LONG: BUY entry impact + SELL exit impact.
+SHORT: SELL entry impact + BUY exit impact.
+The strategy's static round-trip fee/cost allowance remains included.
+For 1H signals, one currently adverse funding payment is reserved conservatively.
+This replaces the old approximation that doubled only the entry-side impact.
 
-5. Production Health now checks database availability as well as:
-- Binance REST
-- latency
-- BTC 1m freshness
-- server clock skew
-- WebSocket health
+4. SCALE-AWARE LIQUIDITY STATE
+THIN/DEEP is no longer based on one absolute $20,000 near-book cutoff.
+Depth is measured relative to the standardized $5k execution probe, together
+with live impact and spread.
 
-6. Database persistence warning.
-If DATABASE_PATH is not under /data/, HEALTH becomes DEGRADED (not PAUSE).
-For Railway persistence, configure a Volume mounted at /data and set:
-DATABASE_PATH=/data/signals.db
+5. BINANCE SERVER-CLOCK GUARD
+A cached public /fapi/v1/time check measures midpoint clock offset and RTT.
+Production pauses when absolute clock offset exceeds 2 seconds or the timing
+request is excessively slow.
 
-7. V11.2 ranking consistency fixes are preserved:
-- Alpha cannot rescue a Production-rejected signal.
-- Negative Alpha can remove a borderline signal below 75.
-- Telegram displays the same frozen Alpha-adjusted rank that was selected.
-- Factor weights stay 1.00 until enough closed forward observations exist.
+6. EXCHANGEINFO / TICK-SIZE CONTRACT
+A cached public /fapi/v1/exchangeInfo snapshot validates:
+- TRADING status
+- PERPETUAL contract type
+- PRICE_FILTER tickSize
+- LOT_SIZE / MIN_NOTIONAL metadata
+Final Entry/Stop/TP levels are rounded conservatively to Binance tick size,
+then LONG/SHORT geometry invariants are rechecked.
 
-8. Railway runs the test suite before bot startup.
+7. DATA ACQUISITION FRESHNESS
+Derivatives bundle acquisition time is measured. A deep derivatives snapshot
+taking more than:
+- 12 seconds for 1H
+- 8 seconds for 15M
+is treated as stale and cannot create a Production signal.
+The exact acquisition timing and ADL age are stored in feature_json.
+
+8. ENTRY QUALITY — NEGATIVE ONLY
+After >=30 resolved forward observations for the same
+setup x timeframe x side:
+- activation rate <50% -> -1.0 PRO
+- activation rate <35% -> -2.0 PRO
+High activation rate never adds points.
+Current WAITING signals and ambiguous OHLC observations are excluded.
+
+9. AMBIGUOUS 1M CANDLES
+A 1-minute OHLC candle cannot prove intrabar event order.
+If one candle contains:
+- Entry + pre-entry Stop, or
+- active Stop + TP2
+the result becomes AMBIGUOUS_ENTRY_STOP / AMBIGUOUS_SL_TP with 0R.
+It is shown in history but excluded from Meta, Factor, Drift/Cohort and
+Robustness learning.
+
+10. CENTRAL BINANCE REQUEST GOVERNOR
+The existing app.market retry/429/418 logic remains the source of truth.
+V11.4.1 additionally adds a process-wide request-concurrency ceiling and a
+stricter low-priority ceiling for aggTrades research. Repeated rate-limit
+failures create a shared cooldown. Critical execution/ADL/OI/depth/time/
+exchangeInfo endpoints are categorized as high priority.
+
+11. DECISION LINEAGE HASH
+Before a Production signal is persisted, a deterministic SHA256 is written to
+feature_json together with feature_schema_version=11.4.1. The hash covers the
+signal geometry, core score, final PRO and decision features and is idempotent.
+
+12. MANUAL /SIGNAL PARITY
+Manual analysis uses the same market_analysis_state path as the whole-market
+scanner. Breadth conflict no longer causes the old manual-only hard rejection.
+Manual signals also receive tick-size normalization, two-sided execution costs,
+Entry Quality and Meta checks.
+
+13. CLEAN V11.4.1 LEARNING COHORT
+Meta, Factor Lab, Cohort/Drift, Challenger summary and Block Robustness use
+release_version LIKE '11.4.1%'. Ambiguous observations are excluded from
+adaptive learning.
+
+14. EXISTING SAFETY RETAINED
+- HTF mandatory confirmation
+- OI/taker/ADL/spread/funding/basis/crowd gates
+- L2 state-first microstructure
+- Meta walk-forward gate and OOD ABSTAIN
+- FDR factor control
+- delivery-aware tracker
+- durable Telegram outbox
+- SQLite WAL + busy timeout + online backups
+- Railway /data persistence fail-fast
+- correlation/portfolio filtering
+- automatic no-edge silence
 
 IMPORTANT
-No software can guarantee that no future runtime/API failure will ever occur.
-This release is designed to fail safely: missing mandatory market/database data
-causes PAUSE/error rather than manufacturing a signal.
-
-9. Race-condition hardening.
-Final Production regime/neutral limits are derived from the signal's own frozen
-market_context, not from a mutable process-wide status variable. Pressing
-SYSTEM during a scan therefore cannot alter that scan's final candidate limit.
+This release does not guarantee profit. It is designed to reduce false
+confidence, stale execution, statistical contamination and hidden runtime
+failure modes. Live Binance/Telegram/Railway conditions can still reveal
+environment-specific problems that cannot be reproduced by static/unit tests.
