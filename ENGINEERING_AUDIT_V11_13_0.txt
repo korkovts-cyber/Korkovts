@@ -1,7 +1,7 @@
 CONTROL AUDIT · V11.13.0 GLOBAL INTELLIGENCE
 
 Verified locally after the final code changes:
-- 110/110 locally runnable focused tests PASS.
+- 112/112 locally runnable focused tests PASS.
 - ResourceWarning promoted to error: PASS.
 - V11.11, V11.12, V11.12.1, V11.12.2 and V11.13 source release checks: PASS.
 - Python compileall: PASS.
@@ -30,11 +30,19 @@ NEWS / GLOBAL SHOCK
 - directional news remains only a catalyst; headline alone never bypasses market/ENTRY gates.
 - heavy breaking-news re-scan is detached from the news watcher lock.
 
+SPOT OUTBOX HOTFIX AUDIT
+- Fresh price/L2/flow is validated before news assessment.
+- Terminal negative/global-breaking news is evaluated before transient Futures crowding.
+- Neutral fresh news preserves valid delivery.
+- Negative fresh news terminal-expires pending BUY even if crowding is temporarily degraded.
+- Compatibility runtime bot_v11100.py and production runtime bot_v11130.py contain byte-identical _deliver_spot_pending implementations.
+- Two new source-contract regression tests pin this ordering and non-blocking startup jobs.
+
 REPOSITORY-DEPENDENT GATE
 - V11.13 remains an overlay and intentionally does not contain app/.
 - Current GitHub main app/ blob hashes were checked against the pinned V11.10 base contract during this audit.
 - test_v11100_core.py: 16 methods; not claimed as locally executed without exact app/ filesystem.
 - test_v11100.py: 214 methods; not claimed as locally executed without exact app/ filesystem.
-- Railway startup contains 340 total test methods and will not start bot_v11130.py unless the pinned app/, dependency lock, all tests and all release checks pass.
+- Railway startup contains 342 total test methods and will not start bot_v11130.py unless the pinned app/, dependency lock, all tests and all release checks pass.
 
 No audit can guarantee profitable market outcomes; this audit verifies software and safety contracts, not future price direction.

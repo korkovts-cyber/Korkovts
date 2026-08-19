@@ -21,3 +21,8 @@ Major changes from V11.12.2 AUTO PULSE
 - User-visible version labels updated to V11.13.0.
 
 Trading strategy cohort stays intentionally unchanged so forward statistics remain comparable.
+
+POST-RELEASE AUDIT HOTFIX
+- Spot pending BUY now checks terminal negative/global news after local price/L2/flow confirmation but before transient Futures crowding degradation.
+- This preserves valid neutral-news delivery while guaranteeing that terminal news risk cannot remain retryable behind a degraded crowding layer.
+- Added regression source contracts for Spot outbox ordering and non-blocking startup maintenance/meta jobs.

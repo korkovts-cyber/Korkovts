@@ -315,4 +315,26 @@ class RuntimeSourceTests(unittest.TestCase):
         self.assertIn('confirm_streak=0',self.arm)
         self.assertIn('confirmation reset',self.arm)
 
+    def test_spot_outbox_news_veto_order_is_stable_in_current_and_compat_runtime(self):
+        for name in ('bot_v11100.py','bot_v11130.py'):
+            src=Path(__file__).with_name(name).read_text(encoding='utf-8')
+            start=src.index('async def _deliver_spot_pending')
+            end=src.index('async def spot_delivery_retry_job',start)
+            block=src[start:end]
+            execution=block.index('if not execution_ok:')
+            news=block.index('news=spot_assess_news(news_snapshot,base)')
+            crowd=block.index('if crowd.get("degraded"):\n')
+            self.assertLess(execution,news,name)
+            self.assertLess(news,crowd,name)
+            self.assertEqual(block.count('news=spot_assess_news(news_snapshot,base)'),1,name)
+
+    def test_startup_does_not_await_meta_or_db_maintenance_jobs(self):
+        start=self.src.index('async def post_init_v112')
+        end=self.src.index('core.post_init=post_init_v112',start)
+        block=self.src[start:end]
+        self.assertNotIn('await meta_refresh_job(',block)
+        self.assertNotIn('await db_maintenance_job(',block)
+        self.assertIn('application.job_queue.run_once(\n        meta_refresh_job',block)
+        self.assertIn('application.job_queue.run_once(\n        db_maintenance_job',block)
+
 if __name__=='__main__': unittest.main(verbosity=2)

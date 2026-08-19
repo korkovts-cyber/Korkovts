@@ -2219,23 +2219,6 @@ async def _deliver_spot_pending(bot,forced_chat_ids=None):
                 close_spot_watch(symbol,"CANCELLED",reason,signal_id)
                 continue
 
-            # Terminal news/event vetoes have priority over transient execution/crowding
-            # failures.  If fresh information already invalidates the BUY, expire the
-            # pending delivery immediately instead of leaving it retryable.
-            if news_snapshot is None:
-                news_snapshot=await core.get_news_sentiment()
-            news=spot_assess_news(news_snapshot,base)
-            if news.get("degraded"):
-                mark_spot_delivery_failed(
-                    delivery_id,"fresh Spot news layer temporarily degraded"
-                )
-                continue
-            if news.get("block") or news.get("recent_negative") or news.get("global_breaking"):
-                reason="fresh Spot news/event risk invalidated BUY"
-                expire_spot_delivery(delivery_id,signal_id,reason)
-                close_spot_watch(symbol,"CANCELLED",reason,signal_id)
-                continue
-
             # Re-check the hard portfolio cap at the actual send moment.
             # Another delivered/pending BUY may have appeared since this row
             # was queued; this signal itself is excluded from the reservation count.
@@ -2298,6 +2281,26 @@ async def _deliver_spot_pending(bot,forced_chat_ids=None):
                     mark_spot_delivery_failed(
                         delivery_id,"fresh Spot L2/taker-flow no longer confirms BUY"
                     )
+                    continue
+
+                # Terminal news/event veto has priority over *transient* Futures
+                # crowding failures, but only after local price/L2/flow confirmed the
+                # candidate is still executable. This preserves the proven outbox
+                # contract: neutral news does not interfere with a valid delivery,
+                # while a fresh negative/global shock expires BUY before retryable
+                # crowding degradation can mask the terminal veto.
+                if news_snapshot is None:
+                    news_snapshot=await core.get_news_sentiment()
+                news=spot_assess_news(news_snapshot,base)
+                if news.get("degraded"):
+                    mark_spot_delivery_failed(
+                        delivery_id,"fresh Spot news layer temporarily degraded"
+                    )
+                    continue
+                if news.get("block") or news.get("recent_negative") or news.get("global_breaking"):
+                    reason="fresh Spot news/event risk invalidated BUY"
+                    expire_spot_delivery(delivery_id,signal_id,reason)
+                    close_spot_watch(symbol,"CANCELLED",reason,signal_id)
                     continue
 
                 if crowd.get("degraded"):

@@ -35,11 +35,11 @@ SAFETY / DATA
 - Market tape/replay and Black Box remain enabled for post-trade diagnosis.
 
 TEST MATRIX
-- Locally runnable focused tests: 110/110 PASS with ResourceWarning promoted to error.
-  V11.11: 18 | V11.12: 21 | V11.12.1: 4 | V11.12.2: 16 | V11.13: 51.
+- Locally runnable focused tests: 112/112 PASS with ResourceWarning promoted to error.
+  V11.11: 18 | V11.12: 21 | V11.12.1: 4 | V11.12.2: 16 | V11.13: 53.
 - App-dependent V11.10 core: 16 methods; runs on Railway after pinned app/ preflight.
 - Inherited production regression: 214 methods; runs on Railway after the core/release gates.
-- Full startup chain: 340 test methods.
+- Full startup chain: 342 test methods.
 - Static audit: 85 Python files, AST/compile clean, no duplicate top-level definitions, dependency lock covered, no literal Telegram callback_data above 64 bytes.
 
 IMPORTANT
