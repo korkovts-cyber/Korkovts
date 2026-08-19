@@ -1,0 +1,32 @@
+KORKOVTS SIGNAL AI V11.19.3 · FULL-UNIVERSE SIGNAL ENGINE
+
+Why this release exists
+The previous production funnel could reduce 145-170 liquid Futures symbols to 1-2
+before derivatives analysis, and Spot could blanket-veto BUYs because slow 1D regime,
+auxiliary news/crowding degradation or a second-stage 4H gate.
+
+FUTURES
+- Every liquid Binance USDT-M perpetual receives 15m/1H/4H discovery and independent LONG/SHORT rank.
+- Heavy derivatives analysis uses a balanced 36-symbol shortlist (top LONG + top SHORT), not only technical survivors.
+- V11.18 Strong/Indicator/Adaptive/Portfolio/Final-Risk/ENTRY-NOW remains authoritative.
+- Real bad taker/order-flow, execution, extreme crowding, negative events and invalid geometry still block.
+- Binance clock guard now uses 3 samples + lowest RTT and recent-good fallback for transient /time failures.
+
+SPOT
+- Every liquid Binance Spot/USDT symbol receives daily/cross-sectional ranking.
+- Deep pool widened to 36 symbols.
+- Removed the pre-L2 second-stage 4H kill switch.
+- Slow BEAR regime can no longer blanket-block an independently strong recovery leader.
+- Missing auxiliary Futures crowding/news telemetry is uncertainty/penalty, not directional proof.
+- Actual negative news, extreme crowding, poor execution, weak flow, bad price location and evidence conflict remain vetoes.
+- Existing Spot watchtower/delivery/risk logic remains in the V11.18 runtime.
+
+IMPORTANT
+This release is designed to stop false 'no signal' caused by architecture.
+It does NOT guarantee profitable trades and does not fabricate an entry just to satisfy a quota.
+
+CODE QUALITY AUDIT
+- Removed stale direct production-function imports.
+- Adaptive deep shortlist avoids artificial 50/50 LONG/SHORT allocation.
+- Final Spot delivery now matches discovery policy for telemetry-only degradation.
+- Added behavioral shortlist and delivery-parity regression contracts.
