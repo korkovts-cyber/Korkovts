@@ -2,7 +2,7 @@ import ast
 import unittest
 from pathlib import Path
 
-class V11193Contracts(unittest.TestCase):
+class V11195Contracts(unittest.TestCase):
     def test_futures_full_universe_before_deep(self):
         s=Path("v11191_futures_engine.py").read_text()
         self.assertIn("full_universe_ranked",s)
@@ -76,8 +76,8 @@ class V11193Contracts(unittest.TestCase):
     def test_full_universe_leaders_feed_fast_radar(self):
         s=Path("v11191_futures_engine.py").read_text()
         self.assertIn('d["near_candidates"]',s)
-        self.assertIn('sorted(ranked,key=lambda r:r[4]',s)
-        self.assertIn('sorted(ranked,key=lambda r:r[5]',s)
+        self.assertTrue('sorted(ranked,key=lambda r:r[4]' in s or 'sorted(ranked,key=lambda row:row[4]' in s)
+        self.assertTrue('sorted(ranked,key=lambda r:r[5]' in s or 'sorted(ranked,key=lambda row:row[5]' in s)
 
     def test_adaptive_shortlist_does_not_force_fifty_fifty(self):
         tree=ast.parse(Path("v11191_futures_engine.py").read_text())
@@ -119,6 +119,50 @@ class V11193Contracts(unittest.TestCase):
             "v11191_integrity.py","v11191_ui.py"
         ):
             ast.parse(Path(p).read_text(),filename=p)
+
+    def test_scan_has_real_deadline_not_post_gather_budget(self):
+        s=Path("v11191_futures_engine.py").read_text()
+        self.assertIn("deadline = started + FULL_SCAN_BUDGET_SEC",s)
+        self.assertIn("asyncio.wait(frame_tasks",s)
+        self.assertIn("frame_pending_cancelled",s)
+        self.assertIn("deep_deadline_cancelled",s)
+        self.assertNotIn("frame_rows = await asyncio.gather",s)
+
+    def test_auto_lock_wait_matches_full_scan_budget(self):
+        s=Path("bot_v11191.py").read_text()
+        self.assertIn("_run_automatic_scan_v11194",s)
+        self.assertIn("FULL_SCAN_BUDGET_SEC",s)
+        self.assertIn("wait_limit",s)
+        self.assertIn("base.core._run_automatic_scan=_run_automatic_scan_v11194",s)
+
+    def test_running_scan_publishes_live_progress(self):
+        s=Path("v11191_futures_engine.py").read_text()
+        self.assertIn("_last[kind]=copy.deepcopy(d)",s)
+        self.assertIn("frame_coverage",s)
+        self.assertIn("deep_coverage",s)
+        self.assertIn("MIN_FRAME_COVERAGE",s)
+
+    def test_geometry_recovery_is_controlled_pullback(self):
+        s=Path("v11195_geometry.py").read_text()
+        self.assertIn("КОНТРОЛИРУЕМЫЙ PULLBACK",s)
+        self.assertIn("price-.35*atr",s.replace(" ",""))
+        self.assertIn("1.35*atr",s)
+        self.assertIn("ENTRY NOW",s)
+
+    def test_geometry_installed_before_v1118(self):
+        s=Path("bot_v11191.py").read_text()
+        self.assertLess(s.index("install_v11195_geometry(scanner,core)"),s.index("import bot_v11180 as base"))
+
+    def test_spot_news_is_auxiliary_at_scan_start(self):
+        s=Path("v11191_spot_engine.py").read_text()
+        self.assertIn("metas,tickers=await asyncio.gather",s)
+        self.assertIn("news_snapshot=await asyncio.wait_for",s)
+        self.assertIn("v114_news_degraded",s)
+
+    def test_futures_rejections_keep_strategy_audit(self):
+        s=Path("v11191_futures_engine.py").read_text()
+        self.assertIn("_strategy_audit",s)
+        self.assertIn("deep_rejections",s)
 
 if __name__=="__main__":
     unittest.main()

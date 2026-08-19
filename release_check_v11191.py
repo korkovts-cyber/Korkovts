@@ -21,7 +21,7 @@ checks={
  "Futures side calibration":"calibration_penalty(symbol,side,timeframe)" in f,
  "Futures diagnostics merge":"getattr(legacy,\"_last_scan\"" in f,
  "Futures news degradation fail-open":"all news-risk sources are unavailable" not in f,
- "Futures ADL fallback":"adl_risks={}" in f and "symbol-level fallback" in f,
+ "Futures ADL fallback":("adl_risks={}" in f or "adl_risks = {}" in f) and "symbol-level ADL fallback" in f,
  "Futures Fast Radar feed":"d[\"near_candidates\"]" in f,
  "Spot entire liquid universe ranked":"ranked.append((pre,symbol,excess))" in s,
  "Spot legacy diagnostics":"_last[\"prefiltered\"]=len(ranked)" in s,
@@ -33,8 +33,15 @@ checks={
  "Clock multi-sample":"for _ in range(3)" in i and "min(samples,key=lambda x:x[0])" in i,
  "Patch before V11.18":"import bot_v11180 as base" in b and b.index("v11191_spot_engine.install()")<b.index("import bot_v11180 as base"),
  "Spot final delivery parity":"_delivery_spot_news" in b and "_delivery_spot_crowding" in b,
+ "Real scanner deadline":"deadline = started + FULL_SCAN_BUDGET_SEC" in f and "deep_deadline_cancelled" in f,
+ "Frame stage bounded":"FRAME_REQUEST_TIMEOUT_SEC" in f and "frame_pending_cancelled" in f,
+ "Scheduler lock parity":"_run_automatic_scan_v11194" in b and "wait_limit" in b,
+ "Live scan progress":"frame_coverage" in f and "deep_coverage" in f,
+ "Geometry recovery module":Path("v11195_geometry.py").is_file() and "КОНТРОЛИРУЕМЫЙ PULLBACK" in Path("v11195_geometry.py").read_text(),
+ "Spot news auxiliary":"news_snapshot=await asyncio.wait_for" in s and "news_degraded" in s,
+ "Real strategy audit":"_strategy_audit" in f and "deep_rejections" in f,
 }
 failed=[k for k,v in checks.items() if not v]
 if failed:
-    raise SystemExit("V11.19.3 RELEASE CHECK FAILED: "+", ".join(failed))
-print("V11.19.3 RELEASE CHECK: OK")
+    raise SystemExit("V11.19.5 RELEASE CHECK FAILED: "+", ".join(failed))
+print("V11.19.5 RELEASE CHECK: OK")

@@ -1,4 +1,4 @@
-"""Korkovts V11.19.3 · CODE-QUALITY AUDITED FULL-UNIVERSE FUTURES ENGINE.
+"""Korkovts V11.19.5 · CODE-QUALITY AUDITED FULL-UNIVERSE FUTURES ENGINE.
 
 Goal:
 - evaluate the whole liquid Binance USD-M perpetual universe before any hard technical gate;
@@ -32,7 +32,11 @@ from app.market import (
 from app.research import annotate_correlation_clusters
 import app.scanner as legacy
 
-FULL_SCAN_BUDGET_SEC = int(os.getenv("V11190_FULL_SCAN_BUDGET_SEC", "175"))
+FULL_SCAN_BUDGET_SEC = max(120, min(240, int(os.getenv("V11194_FULL_SCAN_BUDGET_SEC", "175"))))
+SOURCE_STAGE_TIMEOUT_SEC = max(15, min(45, int(os.getenv("V11194_SOURCE_TIMEOUT_SEC", "30"))))
+FRAME_STAGE_MAX_SEC = max(45, min(120, int(os.getenv("V11194_FRAME_STAGE_MAX_SEC", "90"))))
+FRAME_REQUEST_TIMEOUT_SEC = max(8, min(30, int(os.getenv("V11194_FRAME_REQUEST_TIMEOUT_SEC", "22"))))
+MIN_FRAME_COVERAGE = max(.80, min(1.0, float(os.getenv("V11194_MIN_FRAME_COVERAGE", ".95"))))
 DEEP_CONCURRENCY = max(1, min(5, int(os.getenv("V11191_DEEP_CONCURRENCY", "4"))))
 FRAME_CONCURRENCY = max(1, int(os.getenv("V11190_FRAME_CONCURRENCY", "6")))
 MAX_RETURN_CANDIDATES = max(8, min(24, int(os.getenv("V11191_MAX_RETURN_CANDIDATES", "20"))))
@@ -250,18 +254,25 @@ async def _frames(symbol, kind, sem):
     try:
         async with sem:
             if kind == "main":
-                lower, base, higher = await asyncio.gather(
+                request = asyncio.gather(
                     get_klines(symbol, "15m", 280),
                     get_klines(symbol, "1h", 360),
                     get_klines(symbol, "4h", 360),
                 )
             else:
-                lower, base, higher = await asyncio.gather(
+                request = asyncio.gather(
                     get_klines(symbol, "5m", 300),
                     get_klines(symbol, "15m", 360),
                     get_klines(symbol, "1h", 360),
                 )
+            lower, base, higher = await asyncio.wait_for(
+                request, timeout=FRAME_REQUEST_TIMEOUT_SEC
+            )
         return symbol, lower, base, higher, None
+    except asyncio.TimeoutError:
+        return symbol, None, None, None, TimeoutError(
+            f"frame batch exceeded {FRAME_REQUEST_TIMEOUT_SEC}s"
+        )
     except Exception as exc:
         return symbol, None, None, None, exc
 
@@ -287,23 +298,29 @@ async def _deep_one(row, kind, market_context, news, adl_risks, min_score, sem):
         # First pass discovers the actual side through the exact production
         # analyze wrapper (freshness/coherence included). Calibration is then
         # applied to THAT side and the candidate is re-evaluated if necessary.
+        strategy_audit={}
         result = legacy.analyze(
             symbol,timeframe,base,higher,float(min_score),lower,
-            market_context.get("bias"),d,legacy.for_symbol(news,symbol),market_context
+            market_context.get("bias"),d,legacy.for_symbol(news,symbol),market_context,
+            audit=strategy_audit
         )
         if result is None:
-            return None, "FINAL_STRATEGY_REJECT", d
+            d["_strategy_audit"]=strategy_audit
+            return None,"FINAL_STRATEGY_REJECT",d
 
         side = str(getattr(result,"side","") or "").upper()
         penalty = max(0.0,float(calibration_penalty(symbol,side,timeframe) or 0))
         if penalty>0:
             threshold=min(95.0,float(min_score)+penalty)
+            strategy_audit={}
             result = legacy.analyze(
                 symbol,timeframe,base,higher,threshold,lower,
-                market_context.get("bias"),d,legacy.for_symbol(news,symbol),market_context
+                market_context.get("bias"),d,legacy.for_symbol(news,symbol),market_context,
+                audit=strategy_audit
             )
             if result is None:
-                return None, "CALIBRATION_REJECT", d
+                d["_strategy_audit"]=strategy_audit
+                return None,"CALIBRATION_REJECT",d
         if kind != "main":
             result.expected_window = "30 минут–4 часа"
         return result, "", d
@@ -354,25 +371,51 @@ def _select_deep_rows(liquid_ranked, limit=DEEP_SHORTLIST, min_each=MIN_OPPOSITE
 async def _run(kind):
     d = _diag(kind)
     started = time.monotonic()
+    deadline = started + FULL_SCAN_BUDGET_SEC
+    _last[kind] = copy.deepcopy(d)
+
+    def remaining(reserve=0.0):
+        return max(0.0, deadline - time.monotonic() - float(reserve))
+
     try:
-        symbols, tickers, news = await asyncio.gather(
-            get_symbols(), get_tickers(), legacy.get_news_sentiment()
+        # Essential market universe sources are bounded.
+        symbols, tickers = await asyncio.wait_for(
+            asyncio.gather(get_symbols(), get_tickers()),
+            timeout=min(SOURCE_STAGE_TIMEOUT_SEC, max(1.0, remaining()))
         )
+        d["universe"] = len(symbols)
+
+        # Auxiliary news/ADL must not hold the global scan-lock indefinitely.
         try:
-            adl_risks=await get_adl_risks()
+            news = await asyncio.wait_for(
+                legacy.get_news_sentiment(),
+                timeout=min(18.0, max(1.0, remaining()))
+            )
         except Exception as exc:
-            # Do not kill the whole market scan because the bulk ADL endpoint
-            # failed. _deep_one will use the production symbol-level fallback.
+            news = {
+                "sources":0, "items":[], "assets":{}, "global":0.0,
+                "breaking_events":[], "high_impact_count":0,
+                "v114_news_degraded":True,
+            }
+            d["news_degraded"]=True
+            d["news_reason"]=f"{type(exc).__name__}: {exc}"
+
+        try:
+            adl_risks = await asyncio.wait_for(
+                get_adl_risks(),
+                timeout=min(18.0, max(1.0, remaining()))
+            )
+        except Exception as exc:
             adl_risks={}
             d["adl_bulk_degraded"]=True
             d["adl_bulk_reason"]=f"{type(exc).__name__}: {exc}"
-        d["universe"] = len(symbols)
-        # Enhanced-news degradation is already handled by V11.18 as a stricter
-        # threshold/telemetry state. Never resurrect the old whole-market kill
-        # switch merely because auxiliary news sources temporarily report zero.
+
         d["news_sources"]=int((news or {}).get("sources",0) or 0)
 
-        state = await legacy.market_state(tickers)
+        state = await asyncio.wait_for(
+            legacy.market_state(tickers),
+            timeout=min(15.0, max(1.0, remaining()))
+        )
         analysis_state, neutral_mode = legacy.market_analysis_state(state)
         thresholds = legacy.scan_thresholds(state)
         min_score = thresholds["main"] if kind == "main" else thresholds["short_base"]
@@ -381,131 +424,222 @@ async def _run(kind):
         d["threshold"] = float(min_score)
 
         observed = [
-            s for s in symbols
-            if _f(tickers.get(s, {}).get("quote_volume")) >= MIN_OBSERVED_QUOTE_VOLUME
+            symbol for symbol in symbols
+            if _f(tickers.get(symbol, {}).get("quote_volume")) >= MIN_OBSERVED_QUOTE_VOLUME
         ]
         liquid = [
-            s for s in observed
-            if _f(tickers.get(s, {}).get("quote_volume")) >= MIN_ACTIONABLE_QUOTE_VOLUME
+            symbol for symbol in observed
+            if _f(tickers.get(symbol, {}).get("quote_volume")) >= MIN_ACTIONABLE_QUOTE_VOLUME
         ]
-        observed.sort(key=lambda s: _f(tickers.get(s, {}).get("quote_volume")), reverse=True)
-        liquid_set = set(liquid)
-        d["observed"] = len(observed)
-        d["liquid"] = len(liquid)
+        observed.sort(
+            key=lambda symbol: _f(tickers.get(symbol, {}).get("quote_volume")),
+            reverse=True,
+        )
+        liquid_set=set(liquid)
+        d["observed"]=len(observed)
+        d["liquid"]=len(liquid)
+        _last[kind]=copy.deepcopy(d)
 
-        sem = asyncio.Semaphore(FRAME_CONCURRENCY)
-        frame_rows = await asyncio.gather(*(_frames(s, kind, sem) for s in observed))
-        btc_change = _f(tickers.get("BTCUSDT", {}).get("change"))
-        ranked = []
-        for symbol, lower, base, higher, err in frame_rows:
+        # Stage 1: full-universe multi-timeframe discovery, bounded.
+        sem=asyncio.Semaphore(FRAME_CONCURRENCY)
+        frame_tasks=[asyncio.create_task(_frames(symbol,kind,sem)) for symbol in observed]
+        frame_budget=min(FRAME_STAGE_MAX_SEC, max(1.0, remaining(reserve=45.0)))
+        done,pending=await asyncio.wait(frame_tasks,timeout=frame_budget)
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending,return_exceptions=True)
+        d["frame_pending_cancelled"]=len(pending)
+
+        frame_rows=[]
+        for task in done:
+            try:
+                frame_rows.append(task.result())
+            except Exception as exc:
+                d["frames_failed"]+=1
+                if len(d["error_examples"])<5:
+                    d["error_examples"].append(
+                        f"frame task: {type(exc).__name__}: {exc}"
+                    )
+
+        btc_change=_f(tickers.get("BTCUSDT",{}).get("change"))
+        ranked=[]
+        processed=0
+        for symbol,lower,base,higher,err in frame_rows:
+            processed+=1
             if err is not None or base is None:
-                d["frames_failed"] += 1
-                if len(d["error_examples"]) < 5:
+                d["frames_failed"]+=1
+                if len(d["error_examples"])<5:
                     d["error_examples"].append(f"{symbol}: frame {err}")
-                continue
-            d["frames_ok"] += 1
-            change = _f(tickers.get(symbol, {}).get("change"))
-            sl = _soft_side_score(base, higher, lower, "LONG", change, btc_change)
-            ss = _soft_side_score(base, higher, lower, "SHORT", change, btc_change)
-            ranked.append((symbol, lower, base, higher, sl, ss))
+            else:
+                d["frames_ok"]+=1
+                change=_f(tickers.get(symbol,{}).get("change"))
+                sl=_soft_side_score(base,higher,lower,"LONG",change,btc_change)
+                ss=_soft_side_score(base,higher,lower,"SHORT",change,btc_change)
+                ranked.append((symbol,lower,base,higher,sl,ss))
+            if processed % 20 == 0:
+                _last[kind]=copy.deepcopy(d)
 
-        ranked.sort(key=lambda r: max(r[4], r[5]), reverse=True)
-        d["top_long_watch"] = [
-            {"symbol": r[0], "score": round(r[4], 1)}
-            for r in sorted(ranked, key=lambda r: r[4], reverse=True)[:5]
+        coverage=d["frames_ok"]/max(1,len(observed))
+        d["frame_coverage"]=round(coverage,4)
+        _last[kind]=copy.deepcopy(d)
+        if coverage < MIN_FRAME_COVERAGE:
+            raise RuntimeError(
+                f"full-universe frame coverage incomplete: "
+                f"{d['frames_ok']}/{len(observed)} ({coverage:.0%})"
+            )
+
+        ranked.sort(key=lambda row:max(row[4],row[5]),reverse=True)
+        d["top_long_watch"]=[
+            {"symbol":row[0],"score":round(row[4],1)}
+            for row in sorted(ranked,key=lambda row:row[4],reverse=True)[:5]
         ]
-        d["top_short_watch"] = [
-            {"symbol": r[0], "score": round(r[5], 1)}
-            for r in sorted(ranked, key=lambda r: r[5], reverse=True)[:5]
+        d["top_short_watch"]=[
+            {"symbol":row[0],"score":round(row[5],1)}
+            for row in sorted(ranked,key=lambda row:row[5],reverse=True)[:5]
         ]
-        # Legacy Fast Radar consumes near_candidates between full scans. Feed it
-        # a balanced union of the new LONG/SHORT full-universe leaders so the
-        # wider scanner also improves 60-second discovery instead of starving it.
+
         near={}
-        for r in (
-            sorted(ranked,key=lambda r:r[4],reverse=True)[:8]
-            + sorted(ranked,key=lambda r:r[5],reverse=True)[:8]
+        for row in (
+            sorted(ranked,key=lambda row:row[4],reverse=True)[:8]
+            + sorted(ranked,key=lambda row:row[5],reverse=True)[:8]
         ):
-            side="LONG" if float(r[4])>=float(r[5]) else "SHORT"
-            raw=max(float(r[4]),float(r[5]))
-            prev=near.get(r[0])
+            side="LONG" if float(row[4])>=float(row[5]) else "SHORT"
+            raw=max(float(row[4]),float(row[5]))
+            prev=near.get(row[0])
             if prev is None or raw>float(prev.get("raw",0)):
-                near[r[0]]={"symbol":r[0],"side":side,"raw":round(raw,1),"issues":[]}
-        d["near_candidates"]=sorted(near.values(),key=lambda x:float(x["raw"]),reverse=True)[:12]
+                near[row[0]]={
+                    "symbol":row[0],"side":side,"raw":round(raw,1),"issues":[]
+                }
+        d["near_candidates"]=sorted(
+            near.values(),key=lambda item:float(item["raw"]),reverse=True
+        )[:12]
 
-        # FULL-UNIVERSE CONTRACT:
-        # every liquid symbol already passed 3-frame LONG/SHORT discovery above.
-        # Heavy Binance derivatives endpoints are applied to a WIDE balanced
-        # shortlist, not to only 1-2 technical survivors and not to all ~170
-        # names (which would create avoidable request-weight/rate-limit risk).
-        liquid_ranked = [r for r in ranked if r[0] in liquid_set]
-        long_ranked = sorted(liquid_ranked, key=lambda r:r[4], reverse=True)
-        short_ranked = sorted(liquid_ranked, key=lambda r:r[5], reverse=True)
-        deep_rows = _select_deep_rows(
+        liquid_ranked=[row for row in ranked if row[0] in liquid_set]
+        # Keep these diagnostics for release compatibility and Fast Radar.
+        long_ranked=sorted(liquid_ranked,key=lambda row:row[4],reverse=True)
+        short_ranked=sorted(liquid_ranked,key=lambda row:row[5],reverse=True)
+        deep_rows=_select_deep_rows(
             liquid_ranked,DEEP_SHORTLIST,MIN_OPPOSITE_SIDE_RESERVE
         )
-        d["deep_checked"] = len(deep_rows)
-        d["deep_shortlist_target"] = DEEP_SHORTLIST
-        d["full_universe_ranked"] = len(liquid_ranked)
-        d["deep_long"] = sum(float(r[4])>=float(r[5]) for r in deep_rows)
-        d["deep_short"] = sum(float(r[4])<float(r[5]) for r in deep_rows)
-        d["ticker_screened_all"] = len(symbols)
-        d["non_actionable_low_liquidity"] = max(0,len(symbols)-len(liquid_ranked))
-        deep_sem = asyncio.Semaphore(DEEP_CONCURRENCY)
-        tasks = [
-            _deep_one(r, kind, analysis_state, news, adl_risks, min_score, deep_sem)
-            for r in deep_rows
-        ]
-        results = await asyncio.gather(*tasks)
+        d["deep_checked"]=len(deep_rows)
+        d["deep_shortlist_target"]=DEEP_SHORTLIST
+        d["full_universe_ranked"]=len(liquid_ranked)
+        d["deep_long"]=sum(float(row[4])>=float(row[5]) for row in deep_rows)
+        d["deep_short"]=sum(float(row[4])<float(row[5]) for row in deep_rows)
+        d["ticker_screened_all"]=len(symbols)
+        d["non_actionable_low_liquidity"]=max(0,len(symbols)-len(liquid_ranked))
+        _last[kind]=copy.deepcopy(d)
 
-        live = []
-        frames_for_corr = {}
-        for idx, (row, outcome) in enumerate(zip(deep_rows, results), 1):
-            signal, reason, payload = outcome
-            if reason == "DERIVATIVES_INCOMPLETE":
-                d["derivatives_incomplete"] += 1
+        # Stage 2: expensive derivatives checks. The overall deadline is real:
+        # unfinished work is cancelled and cannot hold scan-lock past budget.
+        deep_sem=asyncio.Semaphore(DEEP_CONCURRENCY)
+        task_map={
+            asyncio.create_task(
+                _deep_one(row,kind,analysis_state,news,adl_risks,min_score,deep_sem)
+            ): idx
+            for idx,row in enumerate(deep_rows)
+        }
+        done,pending=await asyncio.wait(
+            task_map.keys(),timeout=max(1.0,remaining())
+        )
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending,return_exceptions=True)
+        d["deep_deadline_cancelled"]=len(pending)
+
+        results=[None]*len(deep_rows)
+        for task in done:
+            idx=task_map[task]
+            try:
+                results[idx]=task.result()
+            except Exception as exc:
+                results[idx]=(
+                    None,f"ERROR:{type(exc).__name__}",{"_error":str(exc)}
+                )
+        for task in pending:
+            results[task_map[task]]=(
+                None,"SCAN_DEADLINE",
+                {"_error":"deep check cancelled at full-scan deadline"},
+            )
+
+        live=[]
+        frames_for_corr={}
+        for idx,(row,outcome) in enumerate(zip(deep_rows,results),1):
+            signal,reason,payload=outcome
+            if reason=="DERIVATIVES_INCOMPLETE":
+                d["derivatives_incomplete"]+=1
+            elif reason=="SCAN_DEADLINE":
+                pass
             elif reason.startswith("ERROR:"):
-                d["deep_errors"] += 1
+                d["deep_errors"]+=1
             elif not reason:
-                d["deep_complete"] += 1
-            d["rejections"][reason or "PASS"] = int(d["rejections"].get(reason or "PASS", 0)) + 1
-
+                d["deep_complete"]+=1
+            d["rejections"][reason or "PASS"]=int(
+                d["rejections"].get(reason or "PASS",0)
+            )+1
+            if signal is None and isinstance(payload,dict):
+                sa=dict(payload.get("_strategy_audit") or {})
+                if sa and len(d.get("deep_rejections",[]))<8:
+                    d.setdefault("deep_rejections",[]).append({
+                        "symbol":str(sa.get("symbol") or row[0]),
+                        "side":str(sa.get("side") or "?"),
+                        "raw":float(sa.get("raw",0) or 0),
+                        "issues":list(sa.get("issues") or []),
+                        "geometry_recovered":bool(sa.get("geometry_recovered")),
+                    })
             if signal is not None:
-                signal = _decorate(signal, row[4], row[5], idx, len(deep_rows))
+                signal=_decorate(signal,row[4],row[5],idx,len(deep_rows))
                 live.append(signal)
-                frames_for_corr[row[0]] = row[2]
+                frames_for_corr[row[0]]=row[2]
+            if idx % 6 == 0:
+                _last[kind]=copy.deepcopy(d)
 
-            # The outer V11.18 watchdog is authoritative. Record target overruns rather
-            # than cancelling already-started deep checks and biasing selection by latency.
-            if time.monotonic() - started > FULL_SCAN_BUDGET_SEC:
-                d["target_budget_exceeded"] = True
+        # If deadline prevented a material part of deep shortlist from being
+        # checked, report an incomplete scan rather than "no signals".
+        completed_deep=len(deep_rows)-len(pending)
+        d["deep_completed_or_rejected"]=completed_deep
+        deep_coverage=completed_deep/max(1,len(deep_rows))
+        d["deep_coverage"]=round(deep_coverage,4)
+        if pending and deep_coverage < .70:
+            raise RuntimeError(
+                f"deep shortlist deadline coverage incomplete: "
+                f"{completed_deep}/{len(deep_rows)}"
+            )
 
-        # A broader candidate pool feeds V11.18 Strong/Indicator/Portfolio gates.
-        # Do not throw away candidate #5/#10 before those stronger layers see it.
         live.sort(
-            key=lambda s: (
-                _f(getattr(s, "score", 0)),
-                max(_f(getattr(s, "deep_soft_long", 0)), _f(getattr(s, "deep_soft_short", 0))),
+            key=lambda signal:(
+                _f(getattr(signal,"score",0)),
+                max(
+                    _f(getattr(signal,"deep_soft_long",0)),
+                    _f(getattr(signal,"deep_soft_short",0)),
+                ),
             ),
             reverse=True,
         )
         try:
-            annotate_correlation_clusters(live, frames_for_corr)
+            annotate_correlation_clusters(live,frames_for_corr)
         except Exception:
             pass
 
         if neutral_mode:
-            limit = max(NEUTRAL_REGIME_MAX_SIGNALS * 3, 9)
+            limit=max(NEUTRAL_REGIME_MAX_SIGNALS*3,9)
         else:
-            limit = MAX_RETURN_CANDIDATES
-        final = live[:limit]
-        d["final"] = len(final)
-        d["long_final"] = sum(1 for s in final if str(s.side).upper() == "LONG")
-        d["short_final"] = sum(1 for s in final if str(s.side).upper() == "SHORT")
-        _finish(d, "ok", d.get("reason", ""))
+            limit=MAX_RETURN_CANDIDATES
+        final=live[:limit]
+        d["final"]=len(final)
+        d["long_final"]=sum(
+            1 for signal in final if str(signal.side).upper()=="LONG"
+        )
+        d["short_final"]=sum(
+            1 for signal in final if str(signal.side).upper()=="SHORT"
+        )
+        d["elapsed_sec"]=round(time.monotonic()-started,2)
+        _finish(d,"ok",d.get("reason",""))
         return final
     except Exception as exc:
-        _finish(d, "error", exc)
+        _finish(d,"error",exc)
         raise
 
 

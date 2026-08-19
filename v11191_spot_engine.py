@@ -1,4 +1,4 @@
-"""V11.19.3 · CODE-QUALITY AUDITED FULL-UNIVERSE Spot signal engine.
+"""V11.19.5 · CODE-QUALITY AUDITED FULL-UNIVERSE Spot signal engine.
 
 Principles:
 - every eligible Binance Spot/USDT symbol receives daily discovery;
@@ -162,7 +162,7 @@ def analyze(symbol,base_asset,daily,frame4h,frame1h,relative_percentile,excess_b
         "crowding_auxiliary_degraded":bool((derivatives or {}).get("degraded") and not d.get("degraded")),
     })
     if independent:
-        result.reasons.append("V11.19.3 independent recovery leader")
+        result.reasons.append("V11.19.5 independent recovery leader")
     return result
 
 
@@ -295,7 +295,7 @@ async def _deep(symbol,row,rel_pct,excess,market,news_snapshot,fut_set,futures_o
         }
         return normalized,None
     except Exception as exc:
-        log.warning("V11.19.3 Spot deep failed %s: %s",symbol,exc)
+        log.warning("V11.19.5 Spot deep failed %s: %s",symbol,exc)
         return None,f"{symbol}: {type(exc).__name__}: {exc}"
 
 
@@ -311,10 +311,18 @@ async def scan(force=False):
             deep_errors=0,futures_overlay_ok=False,near=[],
         )
         try:
-            metas,tickers,news_snapshot=await asyncio.gather(
-                legacy.universe(),legacy.tickers_24h(force=force),
-                legacy.get_news_sentiment()
+            metas,tickers=await asyncio.gather(
+                legacy.universe(),legacy.tickers_24h(force=force)
             )
+            try:
+                news_snapshot=await asyncio.wait_for(legacy.get_news_sentiment(),timeout=18)
+                _last["news_degraded"]=False
+            except Exception as exc:
+                news_snapshot={"global":0.0,"assets":{},"items":[],"headlines":[],
+                    "breaking_events":[],"sources":0,"source_total":0,"failed_sources":1,
+                    "event_risk":0.0,"high_impact_count":0,"v114_news_degraded":True}
+                _last["news_degraded"]=True
+                _last["news_reason"]=f"{type(exc).__name__}: {exc}"
             _last["universe"]=len(metas)
 
             liquid=[
@@ -391,7 +399,7 @@ async def scan(force=False):
                 fut_set=set(await legacy.futures_symbols())
                 futures_overlay_ok=bool(fut_set)
             except Exception as exc:
-                log.warning("V11.19.3 Spot futures overlay unavailable: %s",exc)
+                log.warning("V11.19.5 Spot futures overlay unavailable: %s",exc)
                 fut_set=set()
                 futures_overlay_ok=False
             _last["futures_overlay_ok"]=futures_overlay_ok
