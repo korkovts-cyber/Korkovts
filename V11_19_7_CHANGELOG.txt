@@ -1,0 +1,62 @@
+KORKOVTS SIGNAL AI V11.19.7 · FULL-UNIVERSE SIGNAL ENGINE
+
+Why this release exists
+The previous production funnel could reduce 145-170 liquid Futures symbols to 1-2
+before derivatives analysis, and Spot could blanket-veto BUYs because slow 1D regime,
+auxiliary news/crowding degradation or a second-stage 4H gate.
+
+FUTURES
+- Every liquid Binance USDT-M perpetual receives 15m/1H/4H discovery and independent LONG/SHORT rank.
+- Heavy derivatives analysis uses a balanced 36-symbol shortlist (top LONG + top SHORT), not only technical survivors.
+- V11.18 Strong/Indicator/Adaptive/Portfolio/Final-Risk/ENTRY-NOW remains authoritative.
+- Real bad taker/order-flow, execution, extreme crowding, negative events and invalid geometry still block.
+- Binance clock guard now uses 3 samples + lowest RTT and recent-good fallback for transient /time failures.
+
+SPOT
+- Every liquid Binance Spot/USDT symbol receives daily/cross-sectional ranking.
+- Deep pool widened to 36 symbols.
+- Removed the pre-L2 second-stage 4H kill switch.
+- Slow BEAR regime can no longer blanket-block an independently strong recovery leader.
+- Missing auxiliary Futures crowding/news telemetry is uncertainty/penalty, not directional proof.
+- Actual negative news, extreme crowding, poor execution, weak flow, bad price location and evidence conflict remain vetoes.
+- Existing Spot watchtower/delivery/risk logic remains in the V11.18 runtime.
+
+IMPORTANT
+This release is designed to stop false 'no signal' caused by architecture.
+It does NOT guarantee profitable trades and does not fabricate an entry just to satisfy a quota.
+
+CODE QUALITY AUDIT
+- Removed stale direct production-function imports.
+- Adaptive deep shortlist avoids artificial 50/50 LONG/SHORT allocation.
+- Final Spot delivery now matches discovery policy for telemetry-only degradation.
+- Added behavioral shortlist and delivery-parity regression contracts.
+
+SCAN-LOCK FIX
+- The 175s scan target is now an actual deadline.
+- Frame batches are individually bounded and pending frame tasks are cancelled.
+- Deep derivatives tasks are cancelled at the overall deadline.
+- AUTO lock wait is aligned to the bounded full-scan budget instead of 90 seconds.
+- Running scans publish live progress; low coverage is reported as incomplete, not "0 signals".
+
+SIGNAL RECOVERY
+- Strong Futures geometry-only rejections become controlled pullback candidates.
+- Existing ENTRY NOW remains authoritative before delivery.
+- Spot news outage is degraded, not a whole-scan abort.
+- Real strategy audit is retained in diagnostics.
+
+API RESILIENCE
+- Full-universe research traffic is capped below critical health/ENTRY capacity.
+- Research waits proactively near Binance request-weight ceiling instead of driving into 429.
+- Health reports real rate-limit cooldown rather than fake 9999ms/+1000s sentinel metrics.
+- A short transient health-probe failure may reuse a very recent verified state as DEGRADED, never as fresh market evidence.
+- Futures frame/deep concurrency reduced slightly while preserving all-symbol ranking and the 36-name deep shortlist.
+
+SOURCE-STAGE RESILIENCE
+- exchangeInfo and ticker/24hr are no longer hidden inside one generic 30s gather.
+- Every mandatory source has its own timeout and exact Telegram diagnostic.
+- exchangeInfo may reuse a recently verified 6h cache; ticker/24hr may reuse only a
+  short 75s verified cache because it drives liquidity/ranking.
+- exchangeInfo and ticker/24hr are critical-priority governor requests.
+- Heavy analysis concurrency defaults to 6, leaving production headroom.
+- A real Binance cooldown is reported explicitly instead of generic TimeoutError.
+- A source-stage failure cannot masquerade as "0 liquid markets / no signals".

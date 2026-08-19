@@ -12,6 +12,8 @@ f=Path("v11191_futures_engine.py").read_text()
 s=Path("v11191_spot_engine.py").read_text()
 i=Path("v11191_integrity.py").read_text()
 b=Path("bot_v11191.py").read_text()
+api=Path("v11196_api_resilience.py").read_text()
+sources=Path("v11197_sources.py").read_text()
 
 checks={
  "Futures entire liquid universe ranked":"full_universe_ranked" in f,
@@ -40,8 +42,16 @@ checks={
  "Geometry recovery module":Path("v11195_geometry.py").is_file() and "КОНТРОЛИРУЕМЫЙ PULLBACK" in Path("v11195_geometry.py").read_text(),
  "Spot news auxiliary":"news_snapshot=await asyncio.wait_for" in s and "news_degraded" in s,
  "Real strategy audit":"_strategy_audit" in f and "deep_rejections" in f,
+ "Critical API reserve":"ANALYSIS_CONCURRENCY" in api and "_critical" in api,
+ "Proactive weight headroom":"SOFT_WEIGHT_CEILING" in api and "_soft_weight_guard" in api,
+ "Health no fake sentinels":"rate-limit cooldown" in api and "recent verified state retained" in api,
+ "Mandatory source split":"mandatory_sources" in sources and "exchangeInfo timeout" in sources and "ticker/24hr timeout" in sources,
+ "exchangeInfo verified cache":"EXCHANGEINFO_CACHE_MAX_SEC" in sources and '"source":"CACHE"' in sources,
+ "ticker short cache":"TICKER_CACHE_MAX_SEC" in sources and "75" in sources,
+ "Mandatory source priority":'path.endswith("/exchangeInfo")' in api and 'path.endswith("/ticker/24hr")' in api,
+ "Source diagnostics":"source_meta" in f and "mandatory_sources" in f and "source_error" in f,
 }
 failed=[k for k,v in checks.items() if not v]
 if failed:
-    raise SystemExit("V11.19.5 RELEASE CHECK FAILED: "+", ".join(failed))
-print("V11.19.5 RELEASE CHECK: OK")
+    raise SystemExit("V11.19.7 RELEASE CHECK FAILED: "+", ".join(failed))
+print("V11.19.7 RELEASE CHECK: OK")

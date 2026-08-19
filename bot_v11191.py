@@ -1,4 +1,4 @@
-"""Korkovts Signal AI V11.19.5 · CODE-QUALITY AUDITED SIGNAL ENGINE."""
+"""Korkovts Signal AI V11.19.7 · CODE-QUALITY AUDITED SIGNAL ENGINE."""
 from __future__ import annotations
 
 # 1) Futures scanner patch before app.bot/bot_v11180 bind scan functions.
@@ -35,10 +35,14 @@ from v11191_ui import install as install_v11191_ui
 install_v11190_ui(v11_ui)
 install_v11191_ui(v11_ui)
 
-# 5) Hardened V11.18 remains the final execution/risk/delivery authority.
+# 5) Reserve Binance health/ENTRY capacity before V11.18 installs the governor.
+from v11196_api_resilience import install as install_v11196_api_resilience
+install_v11196_api_resilience()
+
+# 6) Hardened V11.18 remains the final execution/risk/delivery authority.
 import bot_v11180 as base
 
-APP_VERSION="11.19.5"
+APP_VERSION="11.19.7"
 base.APP_VERSION=APP_VERSION
 base.config.APP_VERSION=APP_VERSION
 base.core.APP_VERSION=APP_VERSION
@@ -47,6 +51,9 @@ base.core.APP_VERSION=APP_VERSION
 base.integrity_clock_status=resilient_clock_status
 base.spot_scan=v11191_spot_engine.scan
 base.spot_scan_status=v11191_spot_engine.status
+import v112_health as _v11196_health
+base.health_check=_v11196_health.check
+base.health_text=_v11196_health.text
 
 # 6) Final Spot delivery parity: telemetry outage is not directional evidence.
 # Actual negative/global-breaking news and EXTREME crowding remain untouched.
@@ -73,7 +80,7 @@ async def _delivery_spot_crowding(symbol):
 base.spot_assess_news=_delivery_spot_news
 base.spot_fresh_derivatives_risk=_delivery_spot_crowding
 
-# 7) V11.19.5 scan-lock scheduler parity.
+# 7) V11.19.7 scan-lock scheduler parity.
 # A legitimate full-universe scan may take close to its bounded ~3-minute
 # budget. The previous 90s wait was incompatible with that design.
 async def _run_automatic_scan_v11194(context,scanner_fn,label):
@@ -129,7 +136,7 @@ async def _run_automatic_scan_v11194(context,scanner_fn,label):
                     triggered+=1
 
         base.core.log.info(
-            "V11.19.5 automatic %s setups=%s armed=%s cancelled=%s "
+            "V11.19.7 automatic %s setups=%s armed=%s cancelled=%s "
             "entry_now=%s waited=%ss",
             label,len(fresh),armed,cancelled,triggered,waited,
         )
@@ -139,7 +146,7 @@ async def _run_automatic_scan_v11194(context,scanner_fn,label):
                 fresh_setups=len(fresh),triggered=triggered,
             )
     except Exception as exc:
-        base.core.log.exception("V11.19.5 automatic %s scan failed",label)
+        base.core.log.exception("V11.19.7 automatic %s scan failed",label)
         if heartbeat and chats:
             await base._send_auto_heartbeat(
                 context.bot,chats,base.scanner.scan_status().get("main",{}),

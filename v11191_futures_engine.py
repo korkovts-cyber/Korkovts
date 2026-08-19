@@ -1,4 +1,4 @@
-"""Korkovts V11.19.5 · CODE-QUALITY AUDITED FULL-UNIVERSE FUTURES ENGINE.
+"""Korkovts V11.19.6 · CODE-QUALITY AUDITED FULL-UNIVERSE FUTURES ENGINE.
 
 Goal:
 - evaluate the whole liquid Binance USD-M perpetual universe before any hard technical gate;
@@ -31,14 +31,15 @@ from app.market import (
 )
 from app.research import annotate_correlation_clusters
 import app.scanner as legacy
+from v11197_sources import mandatory_sources, status as mandatory_source_status
 
 FULL_SCAN_BUDGET_SEC = max(120, min(240, int(os.getenv("V11194_FULL_SCAN_BUDGET_SEC", "175"))))
 SOURCE_STAGE_TIMEOUT_SEC = max(15, min(45, int(os.getenv("V11194_SOURCE_TIMEOUT_SEC", "30"))))
 FRAME_STAGE_MAX_SEC = max(45, min(120, int(os.getenv("V11194_FRAME_STAGE_MAX_SEC", "90"))))
 FRAME_REQUEST_TIMEOUT_SEC = max(8, min(30, int(os.getenv("V11194_FRAME_REQUEST_TIMEOUT_SEC", "22"))))
 MIN_FRAME_COVERAGE = max(.80, min(1.0, float(os.getenv("V11194_MIN_FRAME_COVERAGE", ".95"))))
-DEEP_CONCURRENCY = max(1, min(5, int(os.getenv("V11191_DEEP_CONCURRENCY", "4"))))
-FRAME_CONCURRENCY = max(1, int(os.getenv("V11190_FRAME_CONCURRENCY", "6")))
+DEEP_CONCURRENCY = max(1, min(5, int(os.getenv("V11191_DEEP_CONCURRENCY", "3"))))
+FRAME_CONCURRENCY = max(1, int(os.getenv("V11190_FRAME_CONCURRENCY", "5")))
 MAX_RETURN_CANDIDATES = max(8, min(24, int(os.getenv("V11191_MAX_RETURN_CANDIDATES", "20"))))
 DEEP_SHORTLIST = max(24, min(48, int(os.getenv("V11191_FUTURES_DEEP_SHORTLIST", "36"))))
 MIN_OPPOSITE_SIDE_RESERVE = max(4, min(10, int(os.getenv("V11193_MIN_OPPOSITE_SIDE_RESERVE", "8"))))
@@ -378,12 +379,32 @@ async def _run(kind):
         return max(0.0, deadline - time.monotonic() - float(reserve))
 
     try:
-        # Essential market universe sources are bounded.
-        symbols, tickers = await asyncio.wait_for(
-            asyncio.gather(get_symbols(), get_tickers()),
-            timeout=min(SOURCE_STAGE_TIMEOUT_SEC, max(1.0, remaining()))
-        )
-        d["universe"] = len(symbols)
+        # Mandatory discovery sources are independent and source-aware.
+        # exchangeInfo can use a long verified cache; ticker/24hr only a short
+        # verified cache. A failure names the actual endpoint instead of
+        # collapsing into a generic TimeoutError with a fake 0 -> 0 funnel.
+        try:
+            symbols,tickers,source_meta=await asyncio.wait_for(
+                mandatory_sources(),
+                timeout=min(
+                    max(20.0,SOURCE_STAGE_TIMEOUT_SEC),
+                    max(1.0,remaining())
+                ),
+            )
+        except Exception as exc:
+            d["source_stage"]="ERROR"
+            d["source_error"]=f"{type(exc).__name__}: {exc}"
+            d["mandatory_sources"]=mandatory_source_status()
+            _last[kind]=copy.deepcopy(d)
+            raise RuntimeError(
+                f"mandatory Futures source stage failed: {exc}"
+            ) from exc
+
+        d["source_stage"]="OK"
+        d["source_meta"]=source_meta
+        d["mandatory_sources"]=mandatory_source_status()
+        d["universe"]=len(symbols)
+        _last[kind]=copy.deepcopy(d)
 
         # Auxiliary news/ADL must not hold the global scan-lock indefinitely.
         try:

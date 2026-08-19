@@ -2,7 +2,7 @@ import ast
 import unittest
 from pathlib import Path
 
-class V11195Contracts(unittest.TestCase):
+class V11197Contracts(unittest.TestCase):
     def test_futures_full_universe_before_deep(self):
         s=Path("v11191_futures_engine.py").read_text()
         self.assertIn("full_universe_ranked",s)
@@ -163,6 +163,59 @@ class V11195Contracts(unittest.TestCase):
         s=Path("v11191_futures_engine.py").read_text()
         self.assertIn("_strategy_audit",s)
         self.assertIn("deep_rejections",s)
+
+    def test_api_resilience_reserves_critical_capacity(self):
+        s=Path("v11196_api_resilience.py").read_text()
+        self.assertIn("ANALYSIS_CONCURRENCY",s)
+        self.assertIn("_critical",s)
+        self.assertIn("BTCUSDT",s)
+        self.assertIn("/time",s)
+
+    def test_api_resilience_has_proactive_weight_guard(self):
+        s=Path("v11196_api_resilience.py").read_text()
+        self.assertIn("SOFT_WEIGHT_CEILING",s)
+        self.assertIn("_soft_weight_guard",s)
+        self.assertIn("60.25",s)
+
+    def test_health_does_not_report_fake_9999_metrics(self):
+        s=Path("v11196_api_resilience.py").read_text()
+        self.assertIn("rate-limit cooldown",s)
+        self.assertIn("N/A",s)
+        self.assertIn("recent verified state retained",s)
+
+    def test_api_patch_installed_before_v1118(self):
+        s=Path("bot_v11191.py").read_text()
+        self.assertLess(s.index("install_v11196_api_resilience()"),s.index("import bot_v11180 as base"))
+
+    def test_mandatory_sources_are_split_and_named(self):
+        s=Path("v11197_sources.py").read_text()
+        self.assertIn("exchangeInfo timeout",s)
+        self.assertIn("ticker/24hr timeout",s)
+        self.assertIn("mandatory_sources",s)
+        self.assertIn("return_exceptions=True",s)
+
+    def test_exchangeinfo_has_long_verified_cache(self):
+        s=Path("v11197_sources.py").read_text()
+        self.assertIn("EXCHANGEINFO_CACHE_MAX_SEC",s)
+        self.assertIn("21600",s)
+        self.assertIn('return cached,{',s)
+
+    def test_ticker_cache_is_short_and_bounded(self):
+        s=Path("v11197_sources.py").read_text()
+        self.assertIn("TICKER_CACHE_MAX_SEC",s)
+        self.assertIn("75",s)
+        self.assertIn("_live_tickers",s)
+
+    def test_source_endpoints_have_critical_priority(self):
+        s=Path("v11196_api_resilience.py").read_text()
+        self.assertIn('path.endswith("/exchangeInfo")',s)
+        self.assertIn('path.endswith("/ticker/24hr")',s)
+
+    def test_futures_source_error_is_not_generic_timeout(self):
+        s=Path("v11191_futures_engine.py").read_text()
+        self.assertIn("mandatory Futures source stage failed",s)
+        self.assertIn("source_error",s)
+        self.assertIn("source_meta",s)
 
 if __name__=="__main__":
     unittest.main()
