@@ -1188,7 +1188,7 @@ class V1181Tests(unittest.TestCase):
         text=active_trades_text()
         self.assertIn("LEGACYUSDT",text)
 
-    def test_only_one_live_entry_now_trade_can_be_active(self):
+    def test_up_to_two_live_entry_now_trades_can_be_active(self):
         samples=[
             (-.5,"AAAUSDT",4),(-.4,"BBBUSDT",3),(1.0,"CCCUSDT",2),
             (.8,"AAAUSDT",1),(.7,"BBBUSDT",0),
@@ -1200,6 +1200,9 @@ class V1181Tests(unittest.TestCase):
             )
         self.assertEqual(futures_safety_status().mode,"LIVE")
         self._insert_safety_signal(0.0,shadow=False,status="ACTIVE")
+        s=futures_safety_status()
+        self.assertTrue(s.allow_live)
+        self._insert_safety_signal(0.0,shadow=False,status="ACTIVE",symbol="SECONDUSDT")
         s=futures_safety_status()
         self.assertEqual(s.mode,"POSITION_BUSY")
         self.assertFalse(s.allow_live)

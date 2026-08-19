@@ -1,0 +1,20 @@
+{
+  "version": "11.17.0",
+  "name": "EXECUTION & RISK CORE",
+  "quality_mode": "quality-first",
+  "focused_methods_locally_executed": 166,
+  "app_dependent_core_methods": 16,
+  "inherited_regression_methods": 214,
+  "startup_total_methods": 396,
+  "entrypoint": "bot_v11170.py",
+  "features": [
+    "coherent final market snapshot contract",
+    "non-bypassable final risk gateway before persistence/delivery",
+    "60-second trigger half-life",
+    "local L2 execution reality and notional impact simulation",
+    "lookahead and recursive indicator validation guards",
+    "shadow challenger journal",
+    "outcome-aware failure attribution",
+    "extended immutable entry replay"
+  ]
+}

@@ -1,0 +1,24 @@
+CONTROL AUDIT · V11.14.0 LIVE PERFORMANCE & PRECISION
+
+LOCAL EXECUTION
+- 117/117 focused tests PASS across V11.11, V11.12, V11.12.1, V11.12.2, V11.13 and V11.14.
+- Python compile/AST checks PASS for the overlay.
+- V11.14 standalone source release check PASS.
+- Full V11.10 app-dependent release chain is intentionally not claimed locally because app/ is external to the overlay.
+
+V11.14 SAFETY CONTRACTS
+- Performance analytics are read-only and cannot promote or create a trade.
+- Only CLOSED + activated + non-shadow + delivered Production Futures rows count in live performance.
+- ENTRY_EXPIRED, INVALIDATED and AMBIGUOUS outcomes are excluded from realised performance.
+- Decision Margin is diagnostic only; candidate selection order is unchanged.
+- EARLY WATCH is informational only and cannot send an entry.
+- Existing 30-second persistent ENTRY NOW confirmation remains mandatory.
+- Existing sequence-synchronised Futures L2 gate remains active.
+
+RAILWAY
+- preflight_v11140.py chains through the complete earlier preflight stack and pinned app/ fingerprints.
+- First unittest group: 133 methods (16 app-core + 117 focused).
+- Inherited production regression: 214 methods.
+- Total startup gate: 347 tests before bot_v11140.py starts.
+
+Software checks cannot guarantee profitable market outcomes; performance must be established on forward live data.

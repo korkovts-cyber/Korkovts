@@ -1,0 +1,33 @@
+V11.17.2 DEEP PRODUCTION AUDIT
+
+Scope:
+- signal lifecycle / final ENTRY path
+- Adaptive Edge cohort selection and SQLite behavior
+- market-data coherence across 15m/1H/4H style profiles
+- derivative timing metadata
+- L2 execution simulation and depth fill
+- Telegram callback responsiveness and task shutdown
+- Railway source contracts and regression compatibility
+
+Important defects found and fixed:
+A. Adaptive Edge queried ORDER ASC LIMIT N, so a long history could exclude the newest trades. Fixed to DESC LIMIT N then chronological reversal.
+B. Adaptive Edge synchronous SQLite had timeout=10 on event-loop paths. Bounded to 250ms and cached 30s.
+C. Snapshot coherence used ANY observable timeframe. Changed to ALL required frames observable for production final validation.
+D. Frame coherence did not explicitly reject duplicate/non-monotonic open_time. Added.
+E. Derivative timing could accept zero duration as valid metadata. Positive duration is now mandatory; optional endpoints are checked for consistency.
+F. Execution depth tolerated up to 2% unfilled requested notional. Tightened to 0.5%.
+G. Invalid side could fall into SHORT-side book logic. Explicit LONG/SHORT validation added.
+H. Several synchronous DB report callbacks still occupied PTB's sequential update handler even when work was in to_thread. They now ACK and detach immediately.
+I. Detached UI tasks are cancelled/awaited on shutdown to avoid resource leakage.
+
+Validation:
+- compileall: pass
+- test_v11170_core + test_v11171_core + test_v11172_core: 38/38 pass
+- unittest discovery without app/: 187 runnable tests pass; two module import errors are expected because test_v11100.py and test_v11100_core.py require app/.
+- release_check_v11171: pass
+- release_check_v11172: pass
+
+Not claimed locally:
+- 16 app-dependent core methods
+- 214 inherited production regression methods
+Those remain Railway-gated against the deployed app/ package.

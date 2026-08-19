@@ -1,0 +1,10 @@
+Korkovts V11.18.0 FULL FIXED · MARKET REGIME HOTFIX
+
+This build is based on the user's complete V11.18.0 package.
+Additional audit fixes:
+- breadth divergence no longer creates a blanket hard veto when upstream scanner intentionally enabled independent_mode;
+- divergence remains neutral (never positive credit), so candidates still need all other independent evidence;
+- AUTO diagnostics now expose production rejection bottlenecks (Alpha/Execution/Evidence/Indicator/etc.);
+- previous V11.18 fixes remain included (3-confirmation persistence, transient WAIT, microprice feed/fingerprint, full 20-candidate Indicator pool, current UI labels).
+
+Validation: focused V11.10-V11.18 suite 207/207 PASS; V11.18 release check PASS; compileall PASS.

@@ -1,0 +1,22 @@
+CONTROL AUDIT · V11.15.0 STRONG SIGNALS
+
+Verified on the packaged overlay:
+- 125/125 locally runnable focused tests PASS.
+- V11.11, V11.12, V11.12.1, V11.12.2, V11.13, V11.14 and V11.15 focused layers remain green.
+- Python compile/AST clean.
+- V11.15 source release-check PASS.
+- Strong Consensus is negative-only: it never increases professional_rank and never rescues a rejected setup.
+- QUALIFIED_ONLY cannot arm for Production ENTRY NOW.
+- STRONG requires PRO >=84, >=5 independent confirmations, <=1 soft conflict, acceptable fresh execution, and no hard/mature-negative blocker.
+- PRIME_STRONG requires PRO >=88, >=6 independent confirmations, zero conflicts, non-fragile selection and no NEAR_TIE.
+- Strong Consensus is checked once before arming and again after the full fresh Production rebuild immediately before ENTRY NOW.
+- Meta OOS is used only when its own chronological model is READY.
+- Positive historical edge can strengthen a confidence label but does not alter professional_rank in this layer.
+- UI reserves PRIME branding for PRIME_STRONG and displays the Strong Consensus score.
+
+Repository-dependent gate:
+- app/ is intentionally not bundled in this overlay.
+- preflight_v11150.py chains the exact pinned app/ fingerprint check on Railway.
+- Railway startup runs 355 test methods before bot_v11150.py starts.
+
+This software audit does not guarantee profitable trades. V11.15 intentionally exchanges signal frequency for stricter evidence quality.

@@ -1,0 +1,32 @@
+{
+  "version": "11.18.0",
+  "name": "REGIME + PORTFOLIO DEFENSE · POST-AUDIT FIXED",
+  "base": "11.17.2",
+  "local_focused_tests": 205,
+  "app_dependent_core_tests": 16,
+  "production_regression_tests": 214,
+  "railway_total_tests": 435,
+  "entrypoint": "bot_v11180.py",
+  "policy": "negative-only; no alpha/professional-rank promotion",
+  "post_audit_fixes": [
+    "3-confirmation regimes persist instead of being cancelled at check 2",
+    "transient production-health/derivatives failures keep ARMED candidates fail-closed for recheck",
+    "Futures L2 exports real 2-second microprice drift used by adverse-selection defense",
+    "Indicator Edge evaluates the full bounded qualified pool instead of silently truncating to 10",
+    "V11.18 microstructure evidence is included in final snapshot fingerprints",
+    "Telegram user-visible version labels consistently show V11.18.0"
+  ],
+  "signal_flow_hotfix": {
+    "focused_v11180_tests": 23,
+    "compileall": "PASS",
+    "release_check_v11180": "PASS",
+    "changes": [
+      "independent-mode-support-floor-coherence",
+      "strong-before-portfolio",
+      "initial-canary-delivery-unblock",
+      "two-live-signal-cap",
+      "layer-rejection-diagnostics"
+    ]
+  },
+  "generated_at_utc": "2026-08-19T15:50:46Z"
+}

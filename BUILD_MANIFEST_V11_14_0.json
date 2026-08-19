@@ -1,0 +1,20 @@
+{
+  "app_version": "11.14.0",
+  "release_name": "LIVE PERFORMANCE & PRECISION",
+  "base": "11.13.0 FULL CONTROL",
+  "features": [
+    "Live Performance Engine: rolling 20/50/100 realised Production Futures metrics",
+    "Decision Margin: CLEAR PRIME / CLOSE RACE / NEAR TIE diagnostics",
+    "Early Watch Telegram panel over existing 60-second Fast Radar",
+    "Existing sequence-synchronised Futures L2 remains mandatory for live ENTRY gate"
+  ],
+  "strategy_cohort_changed": false,
+  "fast_radar_seconds": 60,
+  "entry_monitor_seconds": 30,
+  "full_auto_scan_minutes": 10,
+  "locally_executed_focused_methods": 117,
+  "app_dependent_core_methods": 16,
+  "inherited_regression_methods": 214,
+  "startup_total_methods": 347,
+  "notes": "app/ remains repository-provided and is verified by pinned base-contract preflight before Railway startup"
+}

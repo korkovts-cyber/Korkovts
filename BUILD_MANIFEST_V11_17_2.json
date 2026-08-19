@@ -1,0 +1,22 @@
+{
+  "version": "11.17.2",
+  "name": "DEEP AUDIT HARDENING",
+  "quality_mode": "quality-first / fail-closed",
+  "focused_methods_locally_executed": 187,
+  "app_dependent_core_methods": 16,
+  "inherited_regression_methods": 214,
+  "startup_total_methods": 417,
+  "entrypoint": "bot_v11172.py",
+  "deep_audit_fixes": 9,
+  "features": [
+    "latest-cohort Adaptive Edge",
+    "bounded Adaptive SQLite wait + cache",
+    "all-timeframe coherence observability",
+    "duplicate/non-monotonic candle rejection",
+    "derivative timing consistency validation",
+    "99.5% execution-depth fill requirement",
+    "invalid-side execution rejection",
+    "detached DB-heavy Telegram reports",
+    "detached-task shutdown cleanup"
+  ]
+}

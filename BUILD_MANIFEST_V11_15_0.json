@@ -1,0 +1,25 @@
+{
+  "release": "V11.15.0 STRONG SIGNALS",
+  "base": "V11.14.0 LIVE PERFORMANCE & PRECISION",
+  "locally_executed_focused_methods": 125,
+  "app_dependent_core_methods": 16,
+  "inherited_regression_methods": 214,
+  "startup_total_methods": 355,
+  "strong_consensus": {
+    "auto_min_pro": 84,
+    "auto_min_independent_support": 5,
+    "auto_max_soft_conflicts": 1,
+    "prime_min_pro": 88,
+    "prime_min_independent_support": 6,
+    "prime_max_conflicts": 0,
+    "near_tie_prime_allowed": false,
+    "negative_only": true
+  },
+  "local_results": {
+    "focused": "125/125 PASS",
+    "compileall": "PASS",
+    "release_check_v11150": "PASS",
+    "preflight_without_repository_app": "EXPECTED FAIL-CLOSED"
+  },
+  "note": "Full preflight requires the pinned GitHub app/ tree and therefore runs on Railway after upload."
+}

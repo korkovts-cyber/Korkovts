@@ -1,0 +1,27 @@
+{
+  "version": "11.15.1",
+  "name": "INDICATOR EDGE QUALITY-FIRST",
+  "policy": "fewer but stronger signals; missing edge data fails closed",
+  "locally_executed_focused_methods": 138,
+  "app_dependent_core_methods": 16,
+  "inherited_regression_methods": 214,
+  "startup_total_methods": 368,
+  "features": [
+    "anchored_vwap",
+    "volume_profile_poc",
+    "cvd_plus_live_aggtrade_flow",
+    "rvol",
+    "price_oi_matrix",
+    "liquidity_sweep_veto",
+    "anti_duplicate_evidence",
+    "manual_no_bypass",
+    "prime_requires_indicator_prime",
+    "instant_callback_ack",
+    "detached_heavy_button_tasks"
+  ],
+  "local_results": {
+    "focused": "138/138 PASS",
+    "compileall": "PASS",
+    "release_check": "PASS"
+  }
+}

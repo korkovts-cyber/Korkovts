@@ -1,0 +1,30 @@
+V11.17.1 DEEP PRODUCTION AUDIT
+
+Audit scope:
+- final ENTRY lifecycle and persistence ordering
+- Market Snapshot fail-closed behavior
+- Futures L2 freshness/sequence/clock integrity
+- execution depth and trigger expiry
+- lookahead/timestamp validation
+- Final Risk score semantics
+- Telegram callback responsiveness
+- synchronous SQLite work on the asyncio event loop
+- bounded diagnostic storage
+- Railway startup gate and backward release contracts
+
+Defects/hardening findings corrected:
+1. Missing coherence metadata could pass the V11.17 Market Snapshot.
+2. Unobservable coherence timestamps could be treated as eligible.
+3. Missing derivatives timing only reduced score instead of blocking Production.
+4. Snapshot fingerprints included wall-clock capture time, weakening replay/challenger identity.
+5. Future-dated trigger timestamps were normalized to age zero and could pass.
+6. Invalid/unsorted execution depth ladders were not explicitly rejected.
+7. $5k depth was calculated but did not influence eligibility.
+8. Final Risk UI score could display 100/100 even when a component barely passed.
+9. Lookahead guard returned eligible UNKNOWN if timestamp columns were absent.
+10. Duplicate candle timestamps were not rejected.
+11. Challenger/report/replay SQLite operations could block the Telegram event loop.
+12. Challenger journal had no row-retention bound.
+
+Remaining deployment truth:
+The overlay intentionally excludes app/. The 214 inherited production regression tests therefore remain Railway/app-dependent and must finish OK before bot_v11171.py starts.

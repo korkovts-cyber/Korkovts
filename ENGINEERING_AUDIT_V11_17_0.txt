@@ -1,0 +1,34 @@
+CONTROL AUDIT · V11.17.0 EXECUTION & RISK CORE
+
+LOCAL OVERLAY VALIDATION
+- 166/166 locally runnable focused methods PASS.
+- Same 166 methods PASS with ResourceWarning promoted to error.
+- Python AST parse / compileall: PASS.
+- Duplicate top-level definitions: none detected.
+- Literal Telegram callback_data >64 bytes: none detected.
+- V11.17 source release-check: PASS.
+
+FINAL ENTRY CONTRACT
+- Final Risk Gateway appears before core.save_pending(fresh) in the Production trigger path.
+- The gateway requires Strong Consensus, Indicator Edge, Adaptive Edge, coherent/fresh market snapshot and execution reality.
+- Futures L2 must be sequence-synchronised, healthy and fresh.
+- Original READY trigger age is preserved across full revalidation and hard-expires after 60 seconds.
+- Execution simulation checks spread, local-book stability, $1k impact and adverse liquidity withdrawal.
+- New V11.17 layers are negative-only and do not increase professional_rank.
+
+VALIDATION / LEARNING
+- Live Indicator Edge input is guarded against future-timestamp rows.
+- Recursive stability utility is available for research/release validation.
+- Challenger journal is shadow-only and cannot emit Telegram trading signals.
+- ENTRY replay now captures Market Snapshot, Execution Reality, Final Risk and validation state.
+- Failure Attribution joins replay with final signal outcomes for diagnostics only.
+
+REPOSITORY-DEPENDENT GATE
+- This release archive intentionally does not ship the repository app/ base.
+- preflight_v11170 chains the pinned app/ fingerprint contract through earlier preflights.
+- test_v11100_core.py: 16 app-dependent methods execute on Railway with the exact repository app/.
+- test_v11100.py: 214 inherited production-regression methods execute on Railway.
+- Full startup gate: 396 methods before bot_v11170.py starts.
+
+IMPORTANT
+Software validation cannot guarantee future trading accuracy or profitability. V11.17 is designed to reject more marginal/stale/execution-poor entries and improve decision auditability.

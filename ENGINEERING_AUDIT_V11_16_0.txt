@@ -1,0 +1,19 @@
+CONTROL AUDIT · V11.16.0 ADAPTIVE EDGE + FULL REPLAY
+
+Locally executed overlay-focused suite:
+- 149/149 PASS: V11.11 through V11.16 focused/core tests that do not require the external app/ base.
+- V11.16 tests pin small-sample LEARNING, mature deterioration blocking, quarantine, recent-decay blocking, secret redaction, replay fingerprinting, final-entry gate ordering and replay-before-delivery.
+
+Repository-dependent Railway gate:
+- 16 app-dependent V11.10 core tests remain mandatory.
+- 214 inherited production regression tests remain mandatory.
+- Full startup gate: 379 tests before bot_v11160.py starts.
+
+Safety semantics:
+- Adaptive Edge is negative-only and cannot increase professional_rank.
+- Small samples cannot quarantine.
+- Strong Consensus + Indicator Edge + existing execution/L2/flow/news/safety gates remain mandatory.
+- ENTRY replay is recorded before Telegram payload construction/delivery.
+- Replay strips obvious secret-bearing fields.
+
+No software audit can guarantee trading profitability or future market accuracy.

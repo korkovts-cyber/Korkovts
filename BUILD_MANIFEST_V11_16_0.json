@@ -1,0 +1,17 @@
+{
+  "version": "11.16.0",
+  "name": "ADAPTIVE EDGE + FULL REPLAY",
+  "quality_mode": "quality-first",
+  "focused_methods_locally_executed": 149,
+  "app_dependent_core_methods": 16,
+  "inherited_regression_methods": 214,
+  "startup_total_methods": 379,
+  "entrypoint": "bot_v11160.py",
+  "features": [
+    "mature negative-only adaptive cohort guard",
+    "recent 20-vs-prior-20 setup decay detection",
+    "quarantine for persistent negative expectancy",
+    "immutable ENTRY NOW replay before Telegram delivery",
+    "adaptive and replay Telegram panels"
+  ]
+}

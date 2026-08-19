@@ -1,0 +1,55 @@
+CONTROL AUDIT · KORKOVTS SIGNAL AI V11.18.0
+REGIME + PORTFOLIO DEFENSE · POST-AUDIT FIXED
+
+AUDIT SCOPE
+- Production entrypoint and Railway start chain
+- V11.18 regime/portfolio defense
+- Futures ENTRY NOW lifecycle and persistence
+- Production health / derivatives revalidation semantics
+- Futures sequence-synchronised L2 microstructure
+- Final snapshot / execution / risk gateway ordering
+- Indicator Edge candidate-pool propagation
+- Spot WATCH/order-book caps
+- Telegram version/status surfaces
+- Static Python parse/compile and inherited focused regression matrix
+
+MATERIAL DEFECTS FOUND AND FIXED
+1. THREE-CONFIRMATION DEAD END
+   RANGE, RANGE_LOW_VOL, EXTREME_VOL, HIGH_DISPERSION and DIVERGENCE require 3 confirmations in V11.18, while the inherited trigger path attempts Final Risk at streak 2. The original V11.18 code cancelled the arm when the defense rejected 2/3, making 3/3 unreachable. Fixed by treating temporary Final Risk blockers as WAIT. save_pending remains unreachable until one fresh coherent pass satisfies every gate.
+
+2. TRANSIENT DATA FAILURE DESTROYED VALID ARMS
+   A temporary production-health/clock veto or incomplete fresh derivatives snapshot returned the same None used for a structural strategy rejection, so _trigger_arm permanently cancelled the opportunity. Fixed with an explicit _EntryRevalidationWait state. The setup stays ARMED but cannot become Production until fresh mandatory data is available.
+
+3. DEAD MICROPRICE DEFENSE INPUT
+   V11.18 adverse-selection defense read microprice_drift_bps_2s, but the Futures L2 producer did not export it. The value therefore defaulted to zero. Fixed by computing top-of-book microprice in the local sequence-synchronised book, measuring 2-second drift and exporting it through stability()/snapshot(). Old five-field replay history remains readable.
+
+4. HIDDEN TOP-10 QUALIFIED-CANDIDATE LOSS
+   The scanner intentionally allows a bounded V11_CANDIDATE_POOL up to 20, but Indicator Edge re-sorted and sliced that list to 10. Candidates 11-20 could never survive if earlier candidates were later rejected. Fixed so every candidate in the bounded pool receives the same negative-only Indicator Edge check before final portfolio selection.
+
+5. INCOMPLETE EVIDENCE FINGERPRINT
+   Final V11.18 decisions use depth changes, spread dynamics, adverse shares and microprice drift, but the canonical final snapshot fingerprint omitted those fields. Fixed by retaining the inherited V11.17 snapshot schema for backward compatibility, adding a V11.18 evidence sub-schema, and hashing the actual V11.18 microstructure evidence used by the decision path.
+
+6. STALE / MISLEADING USER-VISIBLE STATE LABELS
+   System, Control Center, Final Risk Gate and Early Watch contained inherited V11.17.2/V11.15 labels while APP_VERSION was 11.18.0. Updated all current user-facing surfaces to V11.18.0. Early Watch also no longer claims a universal 2/2 requirement when protected regimes require 3/3. Added regression tests.
+
+REVIEWED / INTENTIONALLY NOT LOOSENED
+- Spot local order-book monitoring remains capped at 10 symbols. This is tied to sequence-synchronised live depth plus REST snapshot/resync work; blindly expanding it would trade signal quantity for weaker/less stable microstructure.
+- Publication remains capped to the strongest 3-4 Futures results after quality/portfolio gates. This matches the bot's purpose: one priority candidate plus limited alternatives.
+- The liquid-universe threshold and quality score are not lowered. No code can guarantee profitable signals, and forcing a trade every 10 minutes would reduce signal integrity.
+
+LOCAL VERIFICATION
+- Python top-level files: AST parse clean.
+- compileall: PASS.
+- Local focused inherited + V11.18 tests: 205/205 PASS after fixes.
+- V11.18 core tests: 17 methods.
+- Release checks V11.11 through V11.18: PASS after the code changes (final V11.18 check also pins the new contracts).
+- V11.18 remains an overlay and intentionally does not contain app/.
+
+RAILWAY VERIFICATION CONTRACT
+- App-dependent core: 16 methods.
+- Inherited production regression: 214 methods.
+- Full startup test chain after this audit: 435 methods.
+- Railway starts bot_v11180.py only after chained preflights, compileall, core tests, release checks and inherited production regression succeed.
+
+SAFETY / EXPECTATION
+This audit verifies software contracts, fail-closed behavior and regression coverage. It cannot guarantee market profitability, future price direction, or a fixed number of tradable signals per hour/day.

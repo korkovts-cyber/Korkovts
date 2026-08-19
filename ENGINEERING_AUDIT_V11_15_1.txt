@@ -1,0 +1,33 @@
+KORKOVTS V11.15.1 · FINAL ENGINEERING AUDIT
+
+QUALITY-FIRST SIGNAL CONTRACT
+- Indicator Edge is negative-only and never increases professional_rank.
+- AUTO/ENTRY NOW require Strong Consensus plus Indicator Edge.
+- PRIME requires Strong Consensus PRIME_STRONG plus Indicator Edge PRIME.
+- Missing Indicator Edge market data fails closed.
+- Manual /signal has no bypass.
+- Fresh full revalidation rebuilds Indicator Edge before final ENTRY NOW.
+
+INDICATOR EDGE PACK
+- Anchored VWAP + Volume Profile POC grouped as one location family.
+- Closed-candle CVD + live aggTrade aggressor pulse grouped as one flow family.
+- RVOL is a participation family.
+- Price/OI matrix corroborates existing positioning; it is not double-counted as a new global family.
+- Adverse liquidity sweep is a terminal quality veto.
+
+TELEGRAM RESPONSIVENESS
+- Heavy button callbacks ACK immediately.
+- Heavy read/scan work is detached from the update handler.
+- Existing scan/entry locks remain authoritative.
+- Detached exceptions are observed/logged.
+
+LOCAL VERIFICATION
+- 138/138 locally runnable focused tests PASS.
+- 101 top-level Python source files AST/compile clean.
+- 0 duplicate top-level definitions.
+- 0 literal callback_data values over Telegram's 64-byte limit.
+- V11.15.1 release check PASS.
+- Full Railway startup gate: 368 test methods = 138 local-focused + 16 app-dependent core + 214 production regression.
+- app/ dependent tests are intentionally not claimed locally without the exact repository app/ tree; Railway preflight pins that tree before startup.
+
+Trading outcomes cannot be guaranteed. This release intentionally prefers abstention over weak signals.

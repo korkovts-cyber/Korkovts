@@ -1,0 +1,21 @@
+{
+  "version": "11.17.1",
+  "name": "EXECUTION & RISK HARDENING",
+  "quality_mode": "quality-first / fail-closed",
+  "focused_methods_locally_executed": 178,
+  "app_dependent_core_methods": 16,
+  "inherited_regression_methods": 214,
+  "startup_total_methods": 408,
+  "entrypoint": "bot_v11171.py",
+  "audit_fixes": 12,
+  "features": [
+    "strict final snapshot metadata contract",
+    "deterministic evidence fingerprint",
+    "future-trigger and L2 clock-skew rejection",
+    "$5k execution-depth quality gate",
+    "weakest-component Final Risk score",
+    "strict timestamp/duplicate-row validation",
+    "async SQLite offload for Telegram responsiveness",
+    "bounded challenger retention"
+  ]
+}
