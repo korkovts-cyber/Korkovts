@@ -1,4 +1,4 @@
-"""Korkovts V11.19.8 · CODE-QUALITY AUDITED FULL-UNIVERSE FUTURES ENGINE.
+"""Korkovts V11.20.2 · CODE-QUALITY AUDITED FULL-UNIVERSE FUTURES ENGINE.
 
 Goal:
 - evaluate the whole liquid Binance USD-M perpetual universe before any hard technical gate;
@@ -570,6 +570,11 @@ async def _run(kind):
         # 9-component production snapshot. Direction allocation is adaptive.
         full_selected=select_full_deep(screened,FULL_DEEP_TARGET,3)
         full_rows=[row for meta,row in full_selected]
+        # UI funnel uses deep_checked as the expensive/full-deep count. The
+        # 36-name fast screen is reported separately to avoid claiming all 36
+        # received the 9-component production snapshot.
+        d["deep_screen_candidates"]=len(deep_rows)
+        d["deep_checked"]=len(full_rows)
         d["deep_full_target"]=len(full_rows)
         d["deep_full_symbols"]=[row[0] for row in full_rows]
         d["deep_full_long"]=sum(float(row[4])>=float(row[5]) for row in full_rows)

@@ -15,6 +15,7 @@ b=Path("bot_v11191.py").read_text()
 api=Path("v11196_api_resilience.py").read_text()
 sources=Path("v11197_sources.py").read_text()
 screen=Path("v11198_deep_screen.py").read_text()
+data_arch=Path("v11200_data_architecture.py").read_text()
 
 checks={
  "Futures entire liquid universe ranked":"full_universe_ranked" in f,
@@ -60,8 +61,23 @@ checks={
  "Truthful manual diagnostics":"_v11199_scan_error_text" in b and "_prime_scan_cmd_v11199" in b,
  "Deep deadline diagnostic":"deep shortlist deadline coverage incomplete" in b,
  "Fast screen diagnostic":"fast derivatives screen coverage incomplete" in b,
+ "Shared REST pacing":"REQUESTS_PER_SEC" in data_arch and "_pace" in data_arch,
+ "REST single-flight":"_inflight" in data_arch and "singleflight_hits" in data_arch,
+ "Telemetry TTL cache":"def _ttl" in data_arch and "cache_hits" in data_arch,
+ "Spot watch snapshot reuse":"SPOT_DERIVATIVE_SNAPSHOT_TTL" in data_arch and "_install_spot_snapshot_reuse" in data_arch,
+ "Lower API headroom ceiling":"V11200_SOFT_WEIGHT_CEILING" in api and '"1500"' in api,
+ "Architecture installed before inherited base":"install_v11200_data_architecture()" in b and b.index("install_v11200_data_architecture()") < b.index("import bot_v11180 as base"),
+ "Singleflight cancellation safe":"asyncio.shield(future)" in data_arch and "except asyncio.CancelledError" in data_arch,
+ "Realtime execution priority":"def _realtime" in data_arch and 'path.endswith("/bookTicker")' in data_arch and 'path.endswith("/depth")' not in data_arch[data_arch.index("def _realtime"):data_arch.index("def _ttl")] and 'path.endswith("/aggTrades")' not in data_arch[data_arch.index("def _realtime"):data_arch.index("def _ttl")],
+ "AUTO health preflight":"health=await base.health_check(force=True)" in b and "skipped before scan: health PAUSE" in b,
+ "Manual PRIME serialized":"async with base.core._scan_lock" in b and "another full-market scan still active" in b,
+ "Spot/Futures heavy scan serialization":"_serialized_spot_scan_v11202" in b and b.rindex("base.spot_scan=_serialized_spot_scan_v11202") > b.rindex("base.spot_scan=v11191_spot_engine.scan"),
+ "Two-stage diagnostic truth":"deep_screen_candidates" in f and 'd["deep_checked"]=len(full_rows)' in f,
+ "exchangeInfo shared TTL":'path.endswith("/exchangeInfo"): return 300.0' in data_arch,
+ "Health recheck inside scan lock":b.count("health=await base.health_check(force=True)")>=3,
+ "Truthful Spot manual diagnostics":"_spot_cmd_v11202" in b and "Spot scan не завершён" in b,
 }
 failed=[k for k,v in checks.items() if not v]
 if failed:
-    raise SystemExit("V11.19.9 RELEASE CHECK FAILED: "+", ".join(failed))
-print("V11.19.9 RELEASE CHECK: OK")
+    raise SystemExit("V11.20.2 RELEASE CHECK FAILED: "+", ".join(failed))
+print("V11.20.2 RELEASE CHECK: OK")

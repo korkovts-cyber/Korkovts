@@ -1,4 +1,4 @@
-"""V11.19.7 · Binance API resilience overlay.
+"""V11.20.2 · Binance API resilience overlay.
 
 Prevents full-universe research traffic from starving production health probes,
 adds proactive request-weight headroom, and makes health diagnostics distinguish
@@ -13,8 +13,8 @@ import time
 import v1141_governor as governor
 import v112_health as health
 
-ANALYSIS_CONCURRENCY=max(4,min(7,int(os.getenv("V11197_ANALYSIS_CONCURRENCY","6"))))
-SOFT_WEIGHT_CEILING=max(1600,min(2200,int(os.getenv("V11196_SOFT_WEIGHT_CEILING","1900"))))
+ANALYSIS_CONCURRENCY=max(4,min(6,int(os.getenv("V11200_ANALYSIS_CONCURRENCY","5"))))
+SOFT_WEIGHT_CEILING=max(1200,min(1800,int(os.getenv("V11200_SOFT_WEIGHT_CEILING","1500"))))
 RECENT_HEALTH_GRACE_SEC=max(30,min(180,int(os.getenv("V11196_HEALTH_GRACE_SEC","90"))))
 _analysis_sem=asyncio.Semaphore(ANALYSIS_CONCURRENCY)
 _original_governed_get=governor.governed_get

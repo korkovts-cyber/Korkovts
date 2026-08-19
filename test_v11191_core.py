@@ -2,7 +2,7 @@ import ast
 import unittest
 from pathlib import Path
 
-class V11199Contracts(unittest.TestCase):
+class V112002Contracts(unittest.TestCase):
     def test_futures_full_universe_before_deep(self):
         s=Path("v11191_futures_engine.py").read_text()
         self.assertIn("full_universe_ranked",s)
@@ -269,6 +269,95 @@ class V11199Contracts(unittest.TestCase):
         s=Path("bot_v11191.py").read_text()
         self.assertIn("_short_scan_cmd_v11199",s)
         self.assertIn('base.core.scan_status().get("short")',s)
+
+    def test_v11200_paces_research_requests(self):
+        s=Path("v11200_data_architecture.py").read_text()
+        self.assertIn("REQUESTS_PER_SEC",s); self.assertIn("await _pace()",s)
+
+    def test_v11200_singleflight(self):
+        s=Path("v11200_data_architecture.py").read_text()
+        self.assertIn("_inflight",s); self.assertIn("singleflight_hits",s)
+
+    def test_v11200_does_not_cache_depth_or_klines(self):
+        s=Path("v11200_data_architecture.py").read_text()
+        self.assertIn("Never cache order book, candles",s)
+        self.assertNotIn('if path.endswith("/depth"): return',s)
+
+    def test_v11200_spot_snapshot_reuse(self):
+        s=Path("v11200_data_architecture.py").read_text()
+        self.assertIn("SPOT_DERIVATIVE_SNAPSHOT_TTL",s)
+        self.assertIn("spot_scanner.get_derivatives_snapshot=spot_cached_snapshot",s)
+        self.assertIn('"150"',s)
+
+    def test_v11200_real_cooldown_still_pauses(self):
+        s=Path("v11196_api_resilience.py").read_text()
+        self.assertIn('if cooldown>0:',s); self.assertIn('Health("PAUSE"',s)
+
+    def test_v11200_weight_headroom(self):
+        s=Path("v11196_api_resilience.py").read_text()
+        self.assertIn("V11200_SOFT_WEIGHT_CEILING",s); self.assertIn('"1500"',s)
+
+    def test_v112001_follower_cancel_cannot_cancel_shared_future(self):
+        s=Path("v11200_data_architecture.py").read_text()
+        self.assertIn("asyncio.shield(future)",s)
+
+    def test_v112001_leader_cancel_wakes_followers(self):
+        s=Path("v11200_data_architecture.py").read_text()
+        self.assertIn("except asyncio.CancelledError",s)
+        self.assertIn("future.cancel()",s)
+        self.assertIn("leader_cancellations",s)
+
+    def test_v112001_execution_priority_is_narrow(self):
+        s=Path("v11200_data_architecture.py").read_text()
+        self.assertIn("def _realtime",s)
+        segment=s[s.index("def _realtime"):s.index("def _ttl")]
+        self.assertIn('/bookTicker',segment)
+        self.assertNotIn('path.endswith("/depth")',segment)
+        self.assertNotIn('path.endswith("/aggTrades")',segment)
+        self.assertIn('_stats["realtime"]+=1',s)
+
+    def test_v112002_auto_skips_full_scan_during_health_pause(self):
+        s=Path("bot_v11191.py").read_text()
+        self.assertIn("health=await base.health_check(force=True)",s)
+        self.assertIn("skipped before scan: health PAUSE",s)
+
+    def test_v112002_manual_prime_uses_shared_scan_lock(self):
+        s=Path("bot_v11191.py").read_text()
+        self.assertIn("another full-market scan still active",s)
+        self.assertIn("async with base.core._scan_lock",s)
+
+    def test_v112002_spot_full_scan_is_serialized_with_futures(self):
+        s=Path("bot_v11191.py").read_text()
+        self.assertIn("_serialized_spot_scan_v11202",s)
+        self.assertIn("base.spot_scan=_serialized_spot_scan_v11202",s)
+        self.assertGreater(s.rindex("base.spot_scan=_serialized_spot_scan_v11202"),s.rindex("base.spot_scan=v11191_spot_engine.scan"))
+
+    def test_v112002_depth_and_aggtrades_do_not_bypass_weight_guard(self):
+        s=Path("v11200_data_architecture.py").read_text()
+        segment=s[s.index("def _realtime"):s.index("def _ttl")]
+        self.assertNotIn('path.endswith("/depth")',segment)
+        self.assertNotIn('path.endswith("/aggTrades")',segment)
+        self.assertIn('/bookTicker',segment)
+
+    def test_v112002_funnel_reports_actual_full_deep_count(self):
+        s=Path("v11191_futures_engine.py").read_text()
+        self.assertIn('d["deep_screen_candidates"]=len(deep_rows)',s)
+        self.assertIn('d["deep_checked"]=len(full_rows)',s)
+
+    def test_v112002_exchangeinfo_is_shared_cached(self):
+        s=Path("v11200_data_architecture.py").read_text()
+        self.assertIn('path.endswith("/exchangeInfo"): return 300.0',s)
+
+    def test_v112002_health_is_rechecked_after_waiting_for_lock(self):
+        s=Path("bot_v11191.py").read_text()
+        block=s[s.index("async with base.core._scan_lock:",s.index("async def _run_automatic_scan")):]
+        self.assertIn("health=await base.health_check(force=True)",block[:1500])
+
+    def test_v112002_spot_manual_reports_actual_reason(self):
+        s=Path("bot_v11191.py").read_text()
+        self.assertIn("_spot_cmd_v11202",s)
+        self.assertIn('reason=str(d.get("reason")',s)
+        self.assertIn("base.spot_cmd=_spot_cmd_v11202",s)
 
 if __name__=="__main__":
     unittest.main()

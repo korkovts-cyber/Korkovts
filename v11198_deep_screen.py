@@ -1,4 +1,4 @@
-"""V11.19.8 · low-cost derivatives pre-screen.
+"""V11.20 · low-cost derivatives pre-screen.
 
 All 36 wide shortlist names are screened. The screen deliberately uses only:
 - one bulk premiumIndex request for funding/mark data across the market;
@@ -19,7 +19,7 @@ import time
 import app.market as market
 
 SCREEN_TIMEOUT_SEC=max(12,min(60,int(os.getenv("V11198_SCREEN_TIMEOUT_SEC","38"))))
-SCREEN_CONCURRENCY=max(3,min(8,int(os.getenv("V11198_SCREEN_CONCURRENCY","6"))))
+SCREEN_CONCURRENCY=max(3,min(6,int(os.getenv("V11200_SCREEN_CONCURRENCY","5"))))
 FULL_DEEP_TARGET=max(10,min(18,int(os.getenv("V11198_FULL_DEEP_TARGET","14"))))
 MIN_SCREEN_COVERAGE=max(.75,min(1.0,float(os.getenv("V11198_MIN_SCREEN_COVERAGE",".85"))))
 

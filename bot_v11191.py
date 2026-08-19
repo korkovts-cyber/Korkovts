@@ -1,4 +1,4 @@
-"""Korkovts Signal AI V11.19.9 · CODE-QUALITY AUDITED SIGNAL ENGINE."""
+"""Korkovts Signal AI V11.20.2 · CODE-QUALITY AUDITED SIGNAL ENGINE."""
 from __future__ import annotations
 
 # 1) Futures scanner patch before app.bot/bot_v11180 bind scan functions.
@@ -39,10 +39,16 @@ install_v11191_ui(v11_ui)
 from v11196_api_resilience import install as install_v11196_api_resilience
 install_v11196_api_resilience()
 
+from v11200_data_architecture import install as install_v11200_data_architecture
+install_v11200_data_architecture()
+
 # 6) Hardened V11.18 remains the final execution/risk/delivery authority.
 import bot_v11180 as base
 
-APP_VERSION="11.19.9"
+from v11200_data_architecture import install_after_base as install_v11200_after_base
+install_v11200_after_base()
+
+APP_VERSION="11.20.2"
 base.APP_VERSION=APP_VERSION
 base.config.APP_VERSION=APP_VERSION
 base.core.APP_VERSION=APP_VERSION
@@ -51,6 +57,15 @@ base.core.APP_VERSION=APP_VERSION
 base.integrity_clock_status=resilient_clock_status
 base.spot_scan=v11191_spot_engine.scan
 base.spot_scan_status=v11191_spot_engine.status
+
+# Serialize every heavy Spot full scan (manual or AUTO) with heavy Futures full
+# scans. Install AFTER defensive rebinding so this wrapper cannot be overwritten.
+_original_spot_scan_v11202=base.spot_scan
+async def _serialized_spot_scan_v11202(*args,**kwargs):
+    async with base.core._scan_lock:
+        return await _original_spot_scan_v11202(*args,**kwargs)
+base.spot_scan=_serialized_spot_scan_v11202
+
 import v112_health as _v11196_health
 base.health_check=_v11196_health.check
 base.health_text=_v11196_health.text
@@ -80,7 +95,7 @@ async def _delivery_spot_crowding(symbol):
 base.spot_assess_news=_delivery_spot_news
 base.spot_fresh_derivatives_risk=_delivery_spot_crowding
 
-# 7) V11.19.9 scan-lock scheduler parity.
+# 7) V11.20.2 scan-lock scheduler parity.
 # A legitimate full-universe scan may take close to its bounded ~3-minute
 # budget. The previous 90s wait was incompatible with that design.
 async def _run_automatic_scan_v11194(context,scanner_fn,label):
@@ -89,6 +104,20 @@ async def _run_automatic_scan_v11194(context,scanner_fn,label):
     try:
         chats=list(base.core.subscribers())
         if not chats:
+            return
+
+        # Do not launch another 180-symbol research cycle while production is
+        # already hard-paused. In particular this breaks the self-sustaining
+        # rate-limit loop: PAUSE -> heavy scan -> more weight -> PAUSE.
+        health=await base.health_check(force=True)
+        if bool(getattr(health,"hard_pause",False)) or str(getattr(health,"status","")).upper()=="PAUSE":
+            if heartbeat:
+                reason=", ".join(getattr(health,"reasons",()) or ()) or "PRODUCTION HEALTH PAUSE"
+                await base._send_auto_heartbeat(
+                    context.bot,chats,base.scanner.scan_status().get("main",{}),
+                    scan_error=f"PRODUCTION HEALTH PAUSE: {reason}",
+                )
+            base.core.log.warning("V11.20.2 automatic %s skipped before scan: health PAUSE",label)
             return
 
         from v11191_futures_engine import FULL_SCAN_BUDGET_SEC
@@ -111,6 +140,17 @@ async def _run_automatic_scan_v11194(context,scanner_fn,label):
             return
 
         async with base.core._scan_lock:
+            # State may have changed while this job waited for a Spot/manual
+            # full scan. Recheck inside the lock before spending the REST budget.
+            health=await base.health_check(force=True)
+            if bool(getattr(health,"hard_pause",False)) or str(getattr(health,"status","")).upper()=="PAUSE":
+                if heartbeat:
+                    reason=", ".join(getattr(health,"reasons",()) or ()) or "PRODUCTION HEALTH PAUSE"
+                    await base._send_auto_heartbeat(
+                        context.bot,chats,base.scanner.scan_status().get("main",{}),
+                        scan_error=f"PRODUCTION HEALTH PAUSE: {reason}",
+                    )
+                return
             all_results=await scanner_fn()
 
         fresh=[
@@ -136,7 +176,7 @@ async def _run_automatic_scan_v11194(context,scanner_fn,label):
                     triggered+=1
 
         base.core.log.info(
-            "V11.19.9 automatic %s setups=%s armed=%s cancelled=%s "
+            "V11.20.2 automatic %s setups=%s armed=%s cancelled=%s "
             "entry_now=%s waited=%ss",
             label,len(fresh),armed,cancelled,triggered,waited,
         )
@@ -146,7 +186,7 @@ async def _run_automatic_scan_v11194(context,scanner_fn,label):
                 fresh_setups=len(fresh),triggered=triggered,
             )
     except Exception as exc:
-        base.core.log.exception("V11.19.9 automatic %s scan failed",label)
+        base.core.log.exception("V11.20.2 automatic %s scan failed",label)
         if heartbeat and chats:
             await base._send_auto_heartbeat(
                 context.bot,chats,base.scanner.scan_status().get("main",{}),
@@ -156,7 +196,7 @@ async def _run_automatic_scan_v11194(context,scanner_fn,label):
 base.core._run_automatic_scan=_run_automatic_scan_v11194
 
 
-# 8) V11.19.9 truthful scan diagnostics.
+# 8) V11.20.2 truthful scan diagnostics.
 # Legacy manual handlers collapsed every exception into "mandatory source unavailable".
 # Keep safety fail-closed, but surface the actual stage/reason to Telegram.
 
@@ -196,13 +236,26 @@ async def _prime_scan_cmd_v11199(update,context):
             "Найденные кандидаты сначала перейдут в ARMED; вход будет отдельным 🚨 ENTRY NOW.",
             reply_markup=base.main_menu()
         )
-        results=await base.core.scan()
+        from v11191_futures_engine import FULL_SCAN_BUDGET_SEC
+        wait_limit=min(225,max(150,int(FULL_SCAN_BUDGET_SEC)+35))
+        waited=0
+        while base.core._scan_lock.locked() and waited<wait_limit:
+            await __import__("asyncio").sleep(5)
+            waited+=5
+        if base.core._scan_lock.locked():
+            raise RuntimeError(f"another full-market scan still active after {waited}s")
+        async with base.core._scan_lock:
+            health=await base.health_check(force=True)
+            if bool(getattr(health,"hard_pause",False)) or str(getattr(health,"status","")).upper()=="PAUSE":
+                reason=", ".join(getattr(health,"reasons",()) or ()) or "PRODUCTION HEALTH PAUSE"
+                raise RuntimeError(f"PRODUCTION HEALTH PAUSE: {reason}")
+            results=await base.core.scan()
         await base.core._send_results(
             context.bot,update.effective_chat.id,results,
             diagnostics=base.core.scan_status().get("main")
         )
     except Exception as exc:
-        base.core.log.exception("V11.19.9 manual market scan failed")
+        base.core.log.exception("V11.20.2 manual market scan failed")
         text=_v11199_scan_error_text(
             exc,base.core.scan_status().get("main"),"Futures"
         )
@@ -213,6 +266,31 @@ if hasattr(base,"scan_cmd_v1142"):
 if hasattr(base,"scan_cmd"):
     base.scan_cmd=_prime_scan_cmd_v11199
 
+
+
+# V11.20.2 truthful manual Spot diagnostics.
+if hasattr(base,"spot_cmd"):
+    async def _spot_cmd_v11202(update,context):
+        msg=update.effective_message
+        await msg.reply_text(
+            "🟢 Анализирую Binance Spot: полный рынок + deep execution/flow. "
+            "Сильный WATCH не является покупкой до live-подтверждения.",
+            reply_markup=base.main_menu(),
+        )
+        try:
+            results=await base.spot_scan(force=False)
+            await base._send_spot_results(
+                context.bot,update.effective_chat.id,results,automatic=False
+            )
+        except Exception as exc:
+            base.core.log.exception("V11.20.2 Spot manual scan failed")
+            d=dict(base.spot_scan_status() or {})
+            reason=str(d.get("reason") or f"{type(exc).__name__}: {exc}")
+            await msg.reply_text(
+                f"⚠️ Spot scan не завершён.\nПричина: {reason}",
+                reply_markup=base.main_menu(),
+            )
+    base.spot_cmd=_spot_cmd_v11202
 
 # Wrap short scan when that public handler exists.
 if hasattr(base,"short_scan_cmd_v1142"):
@@ -225,7 +303,7 @@ if hasattr(base,"short_scan_cmd_v1142"):
                 diagnostics=base.core.scan_status().get("short")
             )
         except Exception as exc:
-            base.core.log.exception("V11.19.9 manual short scan failed")
+            base.core.log.exception("V11.20.2 manual short scan failed")
             text=_v11199_scan_error_text(
                 exc,base.core.scan_status().get("short"),"FAST Futures"
             )
