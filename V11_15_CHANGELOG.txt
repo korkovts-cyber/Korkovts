@@ -1,0 +1,26 @@
+V11.15.0 · STRONG SIGNALS
+
+Purpose
+- Increase selectivity of real AUTO / ENTRY NOW signals without inflating scores.
+- Distinguish a merely qualified candidate from broad independent consensus.
+
+Strong Consensus Gate
+- Negative-only overlay; never increases professional_rank and never rescues rejected setups.
+- AUTO / ENTRY NOW requires: PRO >=84, >=5 independent evidence families, <=1 soft conflict,
+  clean enough fresh execution, no hard conflict, no mature negative forward-edge blocker.
+- PRIME STRONG requires: PRO >=88, >=6 independent families, zero conflicts, stable/non-fragile
+  selection, and no NEAR TIE label.
+- Meta OOS participates only after Meta has independently reached READY.
+- Robust positive history can strengthen the confidence label but never the trading rank.
+
+Delivery behaviour
+- Merely QUALIFIED_ONLY candidates are not armed for production ENTRY NOW.
+- STRONG candidates may enter the normal 30-second ENTRY NOW persistence machine.
+- Only PRIME_STRONG may receive the asynchronous №1 PRIME label.
+- Every final trigger is rechecked through Strong Consensus after the full fresh Production rebuild.
+
+UI
+- Signal cards expose Strong Consensus label and score.
+- PRIME branding is reserved for PRIME_STRONG; a near-tie cannot masquerade as a clear №1.
+
+No profitability guarantee. This release intentionally trades frequency for stronger evidence quality.

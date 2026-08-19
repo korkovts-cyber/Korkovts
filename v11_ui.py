@@ -62,8 +62,9 @@ def main_menu(analyze_symbol=None):
         ],
         [
             InlineKeyboardButton("🚨 ENTRY NOW",callback_data="v1142:entrynow"),
-            InlineKeyboardButton("👁 WATCHTOWER",callback_data="v116:spotwatch"),
+            InlineKeyboardButton("👀 EARLY WATCH",callback_data="v1114:early"),
         ],
+        [InlineKeyboardButton("👁 SPOT WATCHTOWER",callback_data="v116:spotwatch")],
         [
             InlineKeyboardButton("📍 FUTURES LIVE",callback_data="v1142:active"),
             InlineKeyboardButton("📍 SPOT LIVE",callback_data="v117:spotactive"),
@@ -75,13 +76,23 @@ def main_menu(analyze_symbol=None):
         rows.append([InlineKeyboardButton(f"🔎 ПЕРЕПРОВЕРИТЬ · {coin}",callback_data=f"analyze:{sym}")])
     rows += [
         [
+            InlineKeyboardButton("📈 LIVE PERFORMANCE",callback_data="v1114:performance"),
             InlineKeyboardButton("🎯 PRECISION",callback_data="v113:meta"),
-            InlineKeyboardButton("🧪 EDGE LAB",callback_data="v118:edgelab"),
         ],
         [
-            InlineKeyboardButton("🧭 MANAGER",callback_data="v118:manager"),
-            InlineKeyboardButton("🧬 FACTORS",callback_data="v112:lab"),
+            InlineKeyboardButton("🧠 ADAPTIVE EDGE",callback_data="v1116:adaptive"),
+            InlineKeyboardButton("🎞 ENTRY REPLAY",callback_data="v1116:replay"),
         ],
+        [
+            InlineKeyboardButton("🧿 FINAL RISK",callback_data="v1117:risk"),
+            InlineKeyboardButton("🧪 CHALLENGER",callback_data="v1117:challenger"),
+        ],
+        [InlineKeyboardButton("🧭 FAILURE ATTRIBUTION",callback_data="v1117:attribution")],
+        [
+            InlineKeyboardButton("🧪 EDGE LAB",callback_data="v118:edgelab"),
+            InlineKeyboardButton("🧭 MANAGER",callback_data="v118:manager"),
+        ],
+        [InlineKeyboardButton("🧬 FACTORS",callback_data="v112:lab")],
         [
             InlineKeyboardButton("📊 SPOT STATS",callback_data="v115:spotstats"),
             InlineKeyboardButton("🗂 SPOT HISTORY",callback_data="v115:spothistory"),
@@ -122,16 +133,25 @@ def card(s,priority=False):
     """Premium Telegram signal card: compact first screen, dense data kept below."""
     short=str(getattr(s,"timeframe","")).upper()=="15M"
     entry_state=str(getattr(s,"entry_now_state","SETUP") or "SETUP").upper()
+    strong_label=str(getattr(s,"strong_signal_label","") or "")
+    strong_score=float(getattr(s,"strong_signal_score",0) or 0)
+    strong_prime=bool(getattr(s,"strong_prime_eligible",False))
+    adaptive_label=str(getattr(s,"adaptive_edge_label","") or "")
     if entry_state=="ENTER_NOW":
-        title=("🚨 <b>YK PRIME · №1 · ВХОД СЕЙЧАС</b>" if priority else "🚨 <b>YK SIGNAL · ВХОД СЕЙЧАС</b>")
+        title=("🚨 <b>YK PRIME STRONG · №1 · ВХОД СЕЙЧАС</b>" if priority and strong_prime
+               else "🚨 <b>YK STRONG · ВХОД СЕЙЧАС</b>" if priority
+               else "🚨 <b>YK SIGNAL · ВХОД СЕЙЧАС</b>")
     elif entry_state in ("ARMED","READY_PENDING"):
-        title=("🏆 <b>YK PRIME · №1 ОСНОВНАЯ СДЕЛКА</b>" if priority and not short
-               else "⚡ <b>YK FAST · №1 КРАТКОСРОЧНАЯ</b>" if priority
+        title=("🏆 <b>YK PRIME STRONG · №1 ОСНОВНАЯ СДЕЛКА</b>" if priority and not short and strong_prime
+               else "🏆 <b>YK STRONG · №1 КАНДИДАТ</b>" if priority and not short
+               else "⚡ <b>YK FAST STRONG · №1 КРАТКОСРОЧНАЯ</b>" if priority
                else "▫️ <b>YK SIGNAL · СЕТАП</b>")
     elif entry_state=="COOLDOWN":
         title="🧊 <b>YK SIGNAL · COOLDOWN</b>"
     elif priority:
-        title="⚡ <b>YK FAST · №1 КРАТКОСРОЧНАЯ</b>" if short else "🏆 <b>YK PRIME · №1 ОСНОВНАЯ СДЕЛКА</b>"
+        title=("⚡ <b>YK FAST STRONG · №1 КРАТКОСРОЧНАЯ</b>" if short
+               else "🏆 <b>YK PRIME STRONG · №1 ОСНОВНАЯ СДЕЛКА</b>" if strong_prime
+               else "🏆 <b>YK STRONG · №1 КАНДИДАТ</b>")
     else:
         title="▫️ <b>YK FAST · АЛЬТЕРНАТИВА</b>" if short else "▫️ <b>YK SIGNAL · АЛЬТЕРНАТИВА</b>"
 
@@ -222,7 +242,9 @@ def card(s,priority=False):
         "━━━━━━━━━━━━━━━━━━━━\n"
         f"<b>{escape(str(s.symbol))}</b>  ·  {side_icon} <b>{escape(side)}</b>  ·  <b>{escape(str(s.timeframe))}</b>\n"
         f"{_grade_icon(grade)} <b>{escape(grade)}</b>  ·  PRO <b>{rank:.0f}</b>  ·  PRIORITY <b>{decision:.0f}</b>\n"
-        f"{edge_line}\n"
+        + (f"🧱 Strong Consensus <b>{escape(strong_label)}</b> · <b>{strong_score:.0f}/100</b>\n" if strong_label else "")
+        + (f"🧠 Adaptive Edge <b>{escape(adaptive_label)}</b>\n" if adaptive_label else "")
+        + f"{edge_line}\n"
         f"📈 Фактическая forward-оценка <b>{probability_label}</b>\n\n"
         "⚡ <b>СТАТУС</b>\n"
         f"<blockquote>{status}</blockquote>\n"

@@ -115,8 +115,15 @@ def futures(signal:Any):
     bias=str(market.get("bias") or market.get("btc_bias_raw") or "NEUTRAL").upper()
     independent=bool(market.get("independent_mode"))
     breadth_blocked=bool(market.get("breadth_blocked"))
-    if breadth_blocked:
-        families.append(_family("market regime","CONFLICT","breadth conflict",True))
+    if breadth_blocked and not independent:
+        families.append(_family("market regime","CONFLICT","breadth conflict without independent-mode",True))
+    elif breadth_blocked and independent:
+        # Scanner intentionally enables independent-mode when BTC and market breadth
+        # diverge so exceptionally strong symbols can still prove themselves.
+        # Do not contradict that upstream contract with a blanket hard veto here.
+        # Keep the regime family neutral: divergence gives no positive credit, but
+        # the candidate may survive on its other independent evidence families.
+        families.append(_family("market regime","NEUTRAL","breadth conflict; independent-mode active"))
     elif bias==side or (bias=="NEUTRAL" and independent):
         families.append(_family("market regime","SUPPORT",f"BTC {bias}"))
     elif bias in ("LONG","SHORT") and bias!=side:
@@ -153,7 +160,8 @@ def futures(signal:Any):
     else:
         families.append(_family("meta OOS","NEUTRAL","learning / abstain"))
 
-    audit=_finish(families,5)
+    required_support=4 if (breadth_blocked and independent) else 5
+    audit=_finish(families,required_support)
     try:
         signal.feature_snapshot.setdefault("evidence_v117",{}).update({
             "eligible":audit.eligible,"support":audit.support,"neutral":audit.neutral,

@@ -121,7 +121,13 @@ class LocalBook:
         a=sum(p*q for p,q in self.asks.items() if p<=hi)
         imb=(b-a)/(b+a) if b+a else 0.0
         spread=(ask-bid)/mid*10000
-        self.history.append((now,spread,b,a,imb))
+        # Microprice weights the opposite quote by top-of-book size.  When bid
+        # size dominates it moves toward the ask (upward pressure), and vice versa.
+        # Keep it as a sixth history field so old five-field tape anchors remain
+        # replay-compatible.
+        bid_q=float(self.bids.get(bid,0) or 0); ask_q=float(self.asks.get(ask,0) or 0)
+        micro=((ask*bid_q)+(bid*ask_q))/(bid_q+ask_q) if bid_q+ask_q>0 else mid
+        self.history.append((now,spread,b,a,imb,micro))
 
     def top(self,levels=100):
         n=max(1,min(int(levels),1000))
@@ -253,6 +259,10 @@ def stability(symbol,max_age=_EVENT_MAX_AGE):
     bid_change_2s=(cur[2]/prior_bid-1.0) if prior_bid>0 else 0.0
     ask_change_2s=(cur[3]/prior_ask-1.0) if prior_ask>0 else 0.0
     spread_ratio_2s=(cur[1]/prior_spread) if prior_spread>0 else 1.0
+    cur_micro=float(cur[5]) if len(cur)>5 and math.isfinite(float(cur[5])) else None
+    prior_micros=[float(r[5]) for r in prior if len(r)>5 and math.isfinite(float(r[5])) and float(r[5])>0]
+    prior_micro=statistics.median(prior_micros) if prior_micros else None
+    microprice_drift_bps_2s=((cur_micro/prior_micro)-1.0)*10000 if cur_micro and prior_micro else 0.0
     recent5=[r for r in rows if now-r[0] <= 5.0]
     adverse_long=(sum(1 for r in recent5 if r[4] <= -.25)/len(recent5)) if recent5 else 0.0
     adverse_short=(sum(1 for r in recent5 if r[4] >= .25)/len(recent5)) if recent5 else 0.0
@@ -266,7 +276,7 @@ def stability(symbol,max_age=_EVENT_MAX_AGE):
     reason="ok"
     if len(rows)<_MIN_SAMPLES or coverage<_MIN_COVERAGE: score=min(score,55.0); reason="local depth stability warming up"
     if gap_age is not None and gap_age<_RECENT_GAP_BLOCK_SEC: score=min(score,45.0); reason="recent local depth sequence gap"
-    return {**base,"reason":reason,"stability_score":min(100.0,score),"samples":len(rows),"coverage_sec":coverage,"median_spread_bps":med_sp,"current_spread_bps":cur[1],"bid_replenishment_ratio":bid_rep,"ask_replenishment_ratio":ask_rep,"median_imbalance_20bps":med_imb,"last_gap_age_sec":gap_age,"bid_depth_change_2s":bid_change_2s,"ask_depth_change_2s":ask_change_2s,"spread_ratio_2s":spread_ratio_2s,"adverse_long_share_5s":adverse_long,"adverse_short_share_5s":adverse_short,"recent5_samples":len(recent5)}
+    return {**base,"reason":reason,"stability_score":min(100.0,score),"samples":len(rows),"coverage_sec":coverage,"median_spread_bps":med_sp,"current_spread_bps":cur[1],"bid_replenishment_ratio":bid_rep,"ask_replenishment_ratio":ask_rep,"median_imbalance_20bps":med_imb,"last_gap_age_sec":gap_age,"bid_depth_change_2s":bid_change_2s,"ask_depth_change_2s":ask_change_2s,"spread_ratio_2s":spread_ratio_2s,"microprice_drift_bps_2s":microprice_drift_bps_2s,"adverse_long_share_5s":adverse_long,"adverse_short_share_5s":adverse_short,"recent5_samples":len(recent5)}
 
 def snapshot(symbol,max_age=_EVENT_MAX_AGE,levels=100):
     b=_books.get(str(symbol or "").upper()); now=time.time()
@@ -275,7 +285,7 @@ def snapshot(symbol,max_age=_EVENT_MAX_AGE,levels=100):
     if not bids or not asks or bids[0][0]>=asks[0][0]: return None
     st=stability(symbol,max_age)
     best_bid=float(bids[0][0]); best_ask=float(asks[0][0]); mid=(best_bid+best_ask)/2
-    return {"lastUpdateId":int(b.last_update_id),"bids":bids,"asks":asks,"fetched_at":now,"source":"local_futures_ws","event_age_sec":max(0.0,now-b.last_event_ts),"sequence_synced":True,"bridge_pending":bool(b.bridge_pending),"healthy":bool(st.get("healthy")),"best_bid":best_bid,"best_ask":best_ask,"spread_bps":((best_ask-best_bid)/mid*10000 if mid>0 else 999999.0),"stability_score":float(st.get("stability_score",0) or 0),"bid_replenishment_ratio":float(st.get("bid_replenishment_ratio",0) or 0),"ask_replenishment_ratio":float(st.get("ask_replenishment_ratio",0) or 0),"median_imbalance_20bps":float(st.get("median_imbalance_20bps",0) or 0),"book_samples":int(st.get("samples",0) or 0),"book_coverage_sec":float(st.get("coverage_sec",0) or 0),"exchange_lag_sec":float(st.get("exchange_lag_sec",999999)),"bid_depth_change_2s":float(st.get("bid_depth_change_2s",0) or 0),"ask_depth_change_2s":float(st.get("ask_depth_change_2s",0) or 0),"spread_ratio_2s":float(st.get("spread_ratio_2s",1) or 1),"adverse_long_share_5s":float(st.get("adverse_long_share_5s",0) or 0),"adverse_short_share_5s":float(st.get("adverse_short_share_5s",0) or 0),"gaps":int(b.gaps),"resyncs":int(b.resyncs)}
+    return {"lastUpdateId":int(b.last_update_id),"bids":bids,"asks":asks,"fetched_at":now,"source":"local_futures_ws","event_age_sec":max(0.0,now-b.last_event_ts),"sequence_synced":True,"bridge_pending":bool(b.bridge_pending),"healthy":bool(st.get("healthy")),"best_bid":best_bid,"best_ask":best_ask,"spread_bps":((best_ask-best_bid)/mid*10000 if mid>0 else 999999.0),"stability_score":float(st.get("stability_score",0) or 0),"bid_replenishment_ratio":float(st.get("bid_replenishment_ratio",0) or 0),"ask_replenishment_ratio":float(st.get("ask_replenishment_ratio",0) or 0),"median_imbalance_20bps":float(st.get("median_imbalance_20bps",0) or 0),"book_samples":int(st.get("samples",0) or 0),"book_coverage_sec":float(st.get("coverage_sec",0) or 0),"exchange_lag_sec":float(st.get("exchange_lag_sec",999999)),"bid_depth_change_2s":float(st.get("bid_depth_change_2s",0) or 0),"ask_depth_change_2s":float(st.get("ask_depth_change_2s",0) or 0),"spread_ratio_2s":float(st.get("spread_ratio_2s",1) or 1),"microprice_drift_bps_2s":float(st.get("microprice_drift_bps_2s",0) or 0),"adverse_long_share_5s":float(st.get("adverse_long_share_5s",0) or 0),"adverse_short_share_5s":float(st.get("adverse_short_share_5s",0) or 0),"gaps":int(b.gaps),"resyncs":int(b.resyncs)}
 
 def _prune_local(active):
     active=set(active or ())

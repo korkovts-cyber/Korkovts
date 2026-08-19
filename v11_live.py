@@ -56,7 +56,7 @@ _symbols = ()
 _public_symbols = ()
 _market_symbols = ()
 _trade_flow = defaultdict(lambda: deque(maxlen=180))
-_MAX_EXCHANGE_LAG_SEC=2.5
+_MAX_EXCHANGE_LAG_SEC = 2.5
 _ROUTE_STALL_SEC = 45.0
 _route_stalls_public = 0
 _route_stalls_market = 0

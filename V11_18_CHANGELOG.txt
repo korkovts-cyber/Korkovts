@@ -1,0 +1,20 @@
+KORKOVTS SIGNAL AI V11.18.0 · REGIME + PORTFOLIO DEFENSE
+
+Negative-only production defense added after V11.17.2 hardening.
+- Regime-specific persistence: RANGE/EXTREME_VOL/DIVERGENCE require extra confirmations; SHOCK blocks ENTRY.
+- Cross-market guard blocks trades directly opposing explicit BTC bias unless independent-mode has already been earned.
+- Conflict Matrix groups correlated indicators into independent families and blocks 2+ family contradictions.
+- Pre-entry adverse-selection guard uses short-lived microstructure to stop ENTRY when liquidity turns against the trade.
+- Runtime circuit breaker propagates hard health pauses into the non-bypassable final gateway.
+- Final Risk Gateway now includes V11.18 defense score/blockers and remains before save_pending().
+- No positive alpha, PRO rank or signal score is added by this release.
+
+POST-AUDIT FIXES
+- Fixed an ENTRY lifecycle contradiction: regimes that require 3 confirmations no longer get cancelled at confirmation 2. A temporary Final Risk veto now remains fail-closed as WAIT and is rechecked on the next monitor cycle.
+- Health/clock and incomplete-derivatives conditions during fresh ENTRY revalidation are now transient WAIT states instead of permanent arm cancellation.
+- Implemented the previously missing Futures L2 microprice_drift_bps_2s source; adverse-selection defense now receives real microprice evidence.
+- Removed the hidden Indicator Edge top-10 truncation. Every candidate in the already bounded V11_CANDIDATE_POOL (max 20) receives the same negative-only final check before portfolio selection.
+- Extended the canonical final market-snapshot fingerprint with V11.18 microstructure evidence (depth changes, spread ratio, microprice drift and adverse shares) so replay/challenger evidence identity matches the actual decision inputs.
+- Updated stale Telegram UI labels that still showed V11.17.2/V11.15 to V11.18.0.
+- Fixed Early Watch confirmation display so protected regimes are not misleadingly shown as universal 2/2.
+- Added regression contracts for all fixes. Local focused matrix: 205/205 PASS; full Railway chain: 435 tests once the pinned app/ base is present.

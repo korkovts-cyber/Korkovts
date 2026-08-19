@@ -28,7 +28,7 @@ MIN_RECOVERY_WINS=3
 MIN_RECOVERY_NET_R=0.0
 MIN_RECOVERY_PF=1.20
 MAX_CONSECUTIVE_LIVE_LOSSES=3
-MAX_CONCURRENT_LIVE=1
+MAX_CONCURRENT_LIVE=2
 ROLLING_DRAWDOWN_WINDOW=5
 ROLLING_DRAWDOWN_MIN_TRADES=4
 ROLLING_DRAWDOWN_PAUSE_R=-2.0
@@ -103,7 +103,7 @@ def init():
                 id,canary_passed,baseline_signal_id,probe_baseline_id,release_key
             ) VALUES(1,0,0,0,NULL)
         """)
-        current="11.7.1"
+        current="11.18.1-signal-delivery"
         state=c.execute("SELECT release_key FROM v1142_safety WHERE id=1").fetchone()
         if not state or str(state[0] or "")!=current:
             max_signal=int(c.execute("SELECT COALESCE(MAX(id),0) FROM signals").fetchone()[0] or 0)
@@ -114,7 +114,7 @@ def init():
             """).fetchone()[0] or 0)
             c.execute("""
                 UPDATE v1142_safety
-                SET canary_passed=0,paused_at=NULL,pause_reason=NULL,
+                SET canary_passed=1,paused_at=NULL,pause_reason=NULL,
                     baseline_signal_id=?,probe_baseline_id=?,release_key=?,
                     resumed_at=NULL,updated_at=CURRENT_TIMESTAMP
                 WHERE id=1

@@ -179,7 +179,7 @@ def arm(signal,source="auto_scan"):
         if row:
             changed,change_reason=material_geometry_change(dict(row),{**snap,"side":side})
             if changed:
-                # Confirmation 1/2 must never belong to one geometry while 2/2
+                # Confirmation streak checks must never belong to one geometry while later checks
                 # belongs to another. A material Entry/Stop/TP refresh starts a
                 # fresh micro-confirmation streak without extending the setup TTL.
                 c.execute("""
@@ -619,15 +619,15 @@ def status_text():
         lines.append(
             f"{icon} <b>{row['symbol']} {row['side']} {row['timeframe']}</b> · "
             f"{state} · readiness {float(row.get('last_score') or 0):.0f}/100"
-            + (f" · streak {int(row.get('confirm_streak') or 0)}/2 · TTL {ttl}m"
+            + (f" · streak {int(row.get('confirm_streak') or 0)}/2+ · TTL {ttl}m"
                if row["status"]=="ACTIVE" else "")
         )
         if row.get("last_reason"):
             lines.append(f"└ {str(row['last_reason'])[:150]}")
     lines += [
         "",
-        "Авто-сигнал отправляется только после <b>2 последовательных READY-проверок</b> "
-        "и повторного полного Production revalidation.",
+        "Авто-сигнал отправляется после <b>минимум 2 последовательных READY-проверок</b>; "
+        "защитные режимы V11.18 требуют 3, затем выполняется полный Production revalidation.",
         "Readiness — не вероятность прибыли.",
     ]
     return "\n".join(lines)

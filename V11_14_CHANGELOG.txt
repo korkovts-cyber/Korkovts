@@ -1,0 +1,25 @@
+KORKOVTS SIGNAL AI — V11.14.0 LIVE PERFORMANCE & PRECISION
+
+1. LIVE PERFORMANCE ENGINE
+- Read-only realised Futures analytics for delivered + activated + closed Production trades.
+- Rolling windows: last 20 / 50 / 100 closed signals.
+- Win rate, net-R, average R, profit factor, max drawdown, optional MFE/MAE.
+- Mature cohort ranking (minimum 5 closed observations).
+- Shadow, expired, invalidated and ambiguous rows are excluded.
+
+2. DECISION MARGIN
+- Measures how far PRIME is separated from the next-best already-qualified Production candidate.
+- Labels: CLEAR PRIME / CLOSE RACE / NEAR TIE / PRIME.
+- Does not reorder candidates and cannot rescue a rejected setup.
+- Margin is attached to the signal feature snapshot for later audit/replay.
+
+3. EARLY WATCH
+- Dedicated Telegram panel showing Fast Radar focus, recent checks, ARMED candidates and breaking-news focus.
+- EARLY WATCH is explicitly not an entry instruction.
+- Existing 60-second Fast Radar and 30-second ENTRY NOW confirmation remain unchanged.
+
+4. FUTURES L2
+- Existing sequence-synchronised USD-M Futures local order book remains the live microstructure source for ENTRY NOW.
+- V11.14 exposes its value through performance/decision diagnostics rather than adding redundant indicators.
+
+Trading/evidence cohort is intentionally unchanged so forward performance remains comparable.

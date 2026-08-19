@@ -1,0 +1,17 @@
+KORKOVTS SIGNAL AI V11.17.2 — DEEP AUDIT HARDENING
+
+Quality-first production audit patch over V11.17.1.
+
+FIXES
+1. Adaptive Edge now selects the latest bounded cohort, not the oldest LIMIT window.
+2. Adaptive cohort SQLite wait reduced to 250ms with a bounded 30s in-memory cache.
+3. Multi-timeframe coherence is observable only when lower/base/higher timestamps are all observable.
+4. Duplicate/non-monotonic candle timestamps fail coherence.
+5. Derivative acquisition duration must be positive; optional wall timestamps are consistency-checked.
+6. Execution simulation requires >=99.5% requested notional fill instead of tolerating 2% missing depth.
+7. Invalid signal side fails execution simulation.
+8. DB-heavy Telegram report callbacks ACK immediately and detach from the sequential update handler.
+9. Detached UI tasks are cancelled and awaited on shutdown.
+10. Railway gate extended with V11.17.2 preflight/release/core tests.
+
+No positive alpha-score bonuses were added. All new trading changes are negative-only validation/protection.

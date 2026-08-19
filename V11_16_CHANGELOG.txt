@@ -1,0 +1,24 @@
+V11.16.0 · ADAPTIVE EDGE + FULL REPLAY
+
+QUALITY-FIRST ADAPTIVE EDGE
+- Mature production cohorts are evaluated by timeframe + side + setup type.
+- Small samples remain LEARNING and never block.
+- Positive history never increases professional_rank or promotes a signal.
+- Mature negative expectancy, weak PF, or sharp recent 20-trade decay blocks AUTO/ENTRY.
+- Severe mature deterioration enters QUARANTINE.
+- Adaptive gate is checked in broad selection, ARMED admission, and fresh final ENTRY NOW revalidation.
+
+FULL ENTRY REPLAY
+- Every pending Production ENTRY NOW gets an immutable SQLite replay snapshot before Telegram delivery.
+- Snapshot includes geometry, Strong Consensus, Indicator Edge, Adaptive Edge, evidence, execution, data coherence, news and final entry assessment.
+- Obvious secret-bearing keys are stripped before persistence.
+- Deterministic SHA-256 fingerprint protects replay integrity.
+
+TELEGRAM
+- Added ADAPTIVE EDGE and ENTRY REPLAY panels.
+- Existing immediate callback ACK / detached heavy actions remain intact.
+
+SAFETY
+- No positive adaptive bonus.
+- No headline-only entry.
+- Existing Strong Consensus, Indicator Edge, L2, flow, execution, portfolio and safety gates remain mandatory.

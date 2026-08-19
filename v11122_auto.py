@@ -146,6 +146,19 @@ def heartbeat_text(
     else:
         status="⚪ <b>СИГНАЛОВ ДЛЯ ВХОДА НЕТ</b>"
         result="Бот продолжает наблюдение; слабые и неподтверждённые сделки не публикуются."
+    reject_parts=[]
+    reject_fields=(
+        ("alpha_rejected","Alpha"),("metadata_rejected","MetaData"),
+        ("execution_rejected","Execution"),("entry_rejected","EntryHist"),
+        ("evidence_rejected","Evidence"),("meta_rejected","MetaOOS"),
+        ("protection_rejected","Protection"),("indicator_rejected","Indicator"),
+        ("adaptive_rejected","Adaptive"),
+    )
+    for key,label in reject_fields:
+        value=int(d.get(key,0) or 0)
+        if value>0:
+            reject_parts.append(f"{label} −{value}")
+
     lines=[
         f"📡 <b>YK AUTO · 10M CHECK</b> · {stamp}",
         "━━━━━━━━━━━━━━━━━━━━",
@@ -153,6 +166,7 @@ def heartbeat_text(
         result,
         "",
         f"🔎 Рынок: <b>{liquid}</b> ликвидных → <b>{prefiltered}</b> кандидатов → <b>{deep}</b> deep-check → <b>{final}</b> финальных",
+        f"🧪 Production rejects: <b>{escape(' · '.join(reject_parts) if reject_parts else 'нет')}</b>",
         f"👀 ENTRY watch: <b>{int(active_arms)}</b> · новых сетапов: <b>{int(fresh_setups)}</b>",
         f"⚡ Fast Radar: проверено <b>{int(fast_radar_checked)}</b> · поставлено на ENTRY-watch <b>{int(fast_radar_armed)}</b>",
         "⏱ Полный рынок: <b>каждые 10 минут</b> · ENTRY monitor: <b>30 сек</b> · Fast Radar: <b>60 сек</b>",

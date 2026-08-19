@@ -1,0 +1,33 @@
+V11.15.1 · INDICATOR EDGE QUALITY-FIRST
+
+Purpose
+- Fewer but stronger Futures signals.
+- Adds independent context without double-counting correlated indicators.
+
+New quality layer
+- Anchored VWAP from recent directional swing.
+- Volume Profile POC over recent closed candles.
+- Closed-candle CVD plus live Binance aggTrade aggressor pulse as ONE flow family.
+- RVOL participation confirmation.
+- Price/OI matrix as positioning corroboration, not a new global evidence vote.
+- Liquidity Sweep detector with adverse-sweep fail-closed veto.
+
+Policy
+- Indicator Edge never increases professional_rank.
+- Missing indicator data fails closed for AUTO/ENTRY NOW.
+- Manual /signal cannot bypass Indicator Edge.
+- AUTO requires Indicator Edge auto_eligible.
+- PRIME requires both Strong Consensus PRIME_STRONG and Indicator Edge PRIME.
+- Full fresh revalidation rebuilds Indicator Edge before final ENTRY NOW delivery.
+
+Anti-duplication
+- AVWAP + POC = one location family.
+- CVD + aggTrade pulse = one flow family.
+- OI matrix corroborates the existing positioning family.
+- No indicator alone can create a trade.
+
+TELEGRAM STABILITY
+- Heavy callback actions ACK immediately before work starts.
+- SCAN / SHORT / NEWS / SYSTEM / PRICES / MOVERS / SPOT are detached from the update handler.
+- Existing scan and ENTRY locks still serialize trading-critical work.
+- Detached task exceptions are observed and logged; no silent task failures.

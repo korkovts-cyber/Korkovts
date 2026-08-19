@@ -1,0 +1,20 @@
+KORKOVTS SIGNAL AI V11.17.0 · EXECUTION & RISK CORE
+
+QUALITY-FIRST PRODUCTION CHANGES
+- Adds a coherent final Market Snapshot contract built from the same signal evidence and the sequence-synchronised local Futures L2 book.
+- Adds a single Final Risk Gateway which executes before save_pending()/Telegram delivery and cannot be bypassed by AUTO or manual ENTRY promotion paths.
+- Adds Trigger Half-Life: the original READY trigger decays while full revalidation runs and expires after 60 seconds.
+- Adds Execution Reality simulation for $500 / $1,000 / $5,000 notional using the local book, spread, stability and liquidity withdrawal metrics.
+- Adds live lookahead timestamp validation before Indicator Edge calculation.
+- Adds recursive-indicator stability guard utilities for release/research validation.
+- Adds a shadow Challenger journal. Challenger observations never send trading signals.
+- Extends immutable ENTRY replay with Market Snapshot, Execution Reality, Final Risk and validation fields.
+- Adds outcome-aware Failure Attribution diagnostics.
+- Adds Telegram panels for FINAL RISK, CHALLENGER and FAILURE ATTRIBUTION.
+
+SAFETY PRINCIPLES
+- V11.17 layers are negative-only. They cannot increase professional_rank or rescue a rejected signal.
+- Missing/stale/unsynchronised Futures L2 fails closed at the final Production gate.
+- A strong analytical setup is rejected if execution quality is no longer acceptable.
+- Existing Futures safety/shadow modes remain authoritative after the Final Risk quality gate.
+- No automatic strategy-weight mutation is introduced.

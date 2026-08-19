@@ -1,0 +1,29 @@
+KORKOVTS V11.18.0 · SIGNAL FLOW AUDIT HOTFIX
+
+Fixed after 24h no-signal investigation:
+1. Breadth divergence + independent_mode no longer becomes a blanket Evidence veto.
+2. independent_mode uses a coherent 4-family minimum in both Evidence and Strong Consensus;
+   normal regimes remain at 5.
+3. Strong Consensus is evaluated before portfolio truncation, so a non-Strong top-ranked
+   candidate cannot displace a lower-ranked candidate that can actually reach ENTRY.
+4. Initial CANARY shadow-only bootstrap is disabled for this Telegram signal product.
+   Loss circuit-breaker/shadow recovery remains intact.
+5. Concurrent live Futures signal cap aligned to 2 instead of a hidden hard-coded 1.
+6. AUTO diagnostics retain layer-by-layer rejection counts.
+
+Safety retained:
+- hard contradictory flow/execution/news/regime vetoes;
+- Indicator Edge quality gate;
+- adverse-selection/microprice guard;
+- health/clock circuit breaker;
+- final ENTRY revalidation;
+- loss circuit breaker.
+
+Local verification:
+- test_v11180_core.py: PASS (23 tests)
+- release_check_v11180.py: PASS
+- compileall: PASS
+
+The supplied V11.18 package intentionally does not contain app/.
+Full inherited app-dependent regression therefore runs only after upload onto the repository
+that already contains the pinned app/ base.

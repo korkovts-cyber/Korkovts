@@ -125,6 +125,7 @@ def validate_frame(frame,interval:str,role:str="frame",now:float|None=None)->Fra
     latest_close=opens[-1]+seconds
     age=now-latest_close
     future=age < -90.0
+    non_monotonic=any(b<=a for a,b in zip(opens,opens[1:]))
     gaps=[]
     for a,b in zip(opens,opens[1:]):
         delta=b-a
@@ -135,7 +136,7 @@ def validate_frame(frame,interval:str,role:str="frame",now:float|None=None)->Fra
     # small timestamp conversions while still catching one missing candle.
     gap=bool(max_gap is not None and max_gap>seconds*1.50+2.0)
     stale=age>max_age
-    ok=not future and not gap and not stale
+    ok=not future and not gap and not stale and not non_monotonic
     reasons=[]
     if future:
         reasons.append(f"{role} candle closes in the future")
@@ -143,6 +144,8 @@ def validate_frame(frame,interval:str,role:str="frame",now:float|None=None)->Fra
         reasons.append(f"{role} {interval} stale {age/60:.1f}m")
     if gap:
         reasons.append(f"{role} {interval} history gap {max_gap/seconds:.1f}x")
+    if non_monotonic:
+        reasons.append(f"{role} {interval} timestamps duplicate/non-monotonic")
     return FrameStatus(
         role,interval,True,rows,latest_close,age,max_age,future,gap,max_gap,ok,
         "; ".join(reasons) if reasons else "fresh contiguous closed candles",
@@ -159,12 +162,13 @@ def validate_snapshot(timeframe:str,lower,base,higher,now:float|None=None)->Snap
         validate_frame(base,intervals[1],"base",now),
         validate_frame(higher,intervals[2],"higher",now),
     )
-    observable=any(x.observable for x in frames)
+    observable=all(x.observable for x in frames)
     bad=[x.reason for x in frames if x.observable and not x.ok]
+    missing=[x.role for x in frames if not x.observable]
     if bad:
         return SnapshotStatus(False,observable,"STALE_OR_GAPPED","; ".join(bad),frames)
     if not observable:
-        return SnapshotStatus(True,False,"UNOBSERVABLE","timestamp metadata unavailable",frames)
+        return SnapshotStatus(True,False,"UNOBSERVABLE","timestamp metadata unavailable for: "+", ".join(missing),frames)
     return SnapshotStatus(True,True,"GOOD","causal candle snapshot coherent",frames)
 
 

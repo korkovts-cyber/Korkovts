@@ -1,0 +1,16 @@
+KORKOVTS SIGNAL AI V11.17.1 · EXECUTION & RISK HARDENING
+
+PRODUCTION AUDIT FIXES
+- Final Market Snapshot is now strictly fail-closed when coherence/timestamp metadata is missing or unobservable.
+- Derivatives acquisition timing is mandatory at the final gate; missing timing can no longer silently pass.
+- L2 capture clock skew, negative ages and invalid exchange lag now block ENTRY.
+- Snapshot fingerprint no longer changes only because local capture wall-clock time changed.
+- Execution ladder must be sorted/valid; future-dated ENTRY triggers are rejected.
+- $5k executable depth is now part of quality-first execution reality, not telemetry only.
+- Final Risk score now reflects the weakest verified component instead of showing 100/100 for every boolean PASS.
+- Lookahead validation now blocks missing/duplicate timestamps instead of returning fail-open UNKNOWN.
+- Challenger journal has bounded retention to avoid unbounded Railway volume growth.
+- Challenger/Attribution SQLite reports and replay persistence are moved off the Telegram event loop.
+
+QUALITY PRINCIPLE
+V11.17.1 does not create new alpha or increase professional_rank. Every change is negative-only, integrity-only, or runtime-hardening.
