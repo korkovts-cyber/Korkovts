@@ -3138,7 +3138,7 @@ core.alerts_on=alerts_on_v11130
 async def post_init_v112(application):
     global _live_task,_spot_book_task,_futures_l2_task
     await asyncio.to_thread(harden_database)
-    if not await asyncio.to_thread(acquire_v11110_lease,60.0,2.0):
+    if not await asyncio.to_thread(acquire_v11110_lease,15.0,1.0):
         raise RuntimeError("V11.12 singleton lease is held by another live process")
     init_v11110_tape()
     init_rank_audit(); init_lifecycle(); init_details(); init_entry_now(); init_futures_safety(); init_futures_delivery(); init_spot_db(); init_spot_watch(); init_v1180_lab(); init_v1180_manager(); init_v11100_blackbox()
@@ -3152,7 +3152,11 @@ async def post_init_v112(application):
     set_spot_book_symbol_provider(_spot_orderbook_symbols)
     set_futures_l2_symbol_provider(active_entry_symbols)
     await _original_post_init(application)
-    await db_maintenance_job()
+    # Do not block Telegram polling on maintenance. Run it immediately after
+    # polling startup via JobQueue instead.
+    application.job_queue.run_once(
+        db_maintenance_job,when=2,name="v11130-db-bootstrap"
+    )
 
     # Telegram polling must become responsive immediately after post_init.
     # Build CPU-heavy walk-forward models via JobQueue after polling starts;
