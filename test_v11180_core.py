@@ -156,6 +156,18 @@ class V11180Tests(unittest.TestCase):
         self.assertLess(strong_pos,portfolio_pos)
         self.assertIn('d["strong_rejected"]=len(strong_rejected)',src)
 
+    def test_spot_terminal_extreme_precedes_news_but_news_precedes_degraded_crowding(self):
+        for name in ("bot_v11100.py","bot_v11130.py","bot_v11180.py"):
+            src=Path(name).read_text(encoding="utf-8")
+            start=src.index("async def _deliver_spot_pending")
+            end=src.index("async def spot_delivery_retry_job",start)
+            block=src[start:end]
+            extreme=block.index('if crowd.get("extreme"):\n')
+            news=block.index('news=spot_assess_news(news_snapshot,base)')
+            degraded=block.index('if crowd.get("degraded"):\n')
+            self.assertLess(extreme,news,name)
+            self.assertLess(news,degraded,name)
+
     def test_signal_bot_does_not_start_in_hidden_canary_and_allows_two_live(self):
         src=Path('v1142_risk.py').read_text()
         self.assertIn('MAX_CONCURRENT_LIVE=1',src)
@@ -163,5 +175,15 @@ class V11180Tests(unittest.TestCase):
         self.assertIn('delivery_bootstrap_key',src)
         self.assertIn('bootstrap_release="11.18.1-signal-delivery"',src)
         self.assertIn('effective_max_concurrent_live()',src)
+        # Redeploy/bootstrap must not erase a real loss circuit or its baselines.
+        self.assertIn('Preserve any real CIRCUIT_PAUSE',src)
+        self.assertNotIn('SET canary_passed=1,paused_at=NULL,pause_reason=NULL,\n                    baseline_signal_id=?,probe_baseline_id=?,\n                    delivery_bootstrap_key=?',src)
+
+    def test_futures_second_live_delivery_respects_effective_cap(self):
+        for name in ('bot_v11100.py','bot_v11130.py','bot_v11180.py'):
+            src=Path(name).read_text()
+            self.assertIn('effective_max_concurrent_live as futures_live_cap',src)
+            self.assertIn('futures_other_live_count(signal_id)>=max(1,int(futures_live_cap()))',src)
+            self.assertNotIn('futures_other_live_count(signal_id)>0',src)
 
 if __name__=='__main__': unittest.main()

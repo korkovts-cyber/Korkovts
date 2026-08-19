@@ -130,13 +130,14 @@ def init():
         # - preserve the old-schema regression contract (old schemas still reset to CANARY).
         if release==bootstrap_release:
             # Transitional value written by the first V11.18 signal-flow hotfix.
+            # Normalize the release key, but NEVER clear a real circuit pause or
+            # reset its recovery baselines during a redeploy.
             c.execute("""
                 UPDATE v1142_safety
-                SET canary_passed=1,paused_at=NULL,pause_reason=NULL,
-                    baseline_signal_id=?,probe_baseline_id=?,release_key=?,
-                    delivery_bootstrap_key=?,resumed_at=NULL,updated_at=CURRENT_TIMESTAMP
+                SET canary_passed=1,release_key=?,delivery_bootstrap_key=?,
+                    updated_at=CURRENT_TIMESTAMP
                 WHERE id=1
-            """,(max_prod,max_signal,baseline_release,bootstrap_release))
+            """,(baseline_release,bootstrap_release))
         elif release!=baseline_release:
             is_brand_new=(not release and had_release_key)
             c.execute("""
@@ -150,14 +151,15 @@ def init():
                 max_prod,max_signal,baseline_release,bootstrap_release,
             ))
         elif bootstrap!=bootstrap_release:
-            # Existing V11.7.1 deployment: unblock initial hidden CANARY once.
+            # Existing V11.7.1 deployment: unblock only the initial hidden CANARY.
+            # Preserve any real CIRCUIT_PAUSE, pause reason and historical/recovery
+            # baselines so a redeploy can never erase loss protection.
             c.execute("""
                 UPDATE v1142_safety
-                SET canary_passed=1,paused_at=NULL,pause_reason=NULL,
-                    baseline_signal_id=?,probe_baseline_id=?,
-                    delivery_bootstrap_key=?,resumed_at=NULL,updated_at=CURRENT_TIMESTAMP
+                SET canary_passed=1,delivery_bootstrap_key=?,
+                    updated_at=CURRENT_TIMESTAMP
                 WHERE id=1
-            """,(max_prod,max_signal,bootstrap_release))
+            """,(bootstrap_release,))
 
 def _state():
     init()

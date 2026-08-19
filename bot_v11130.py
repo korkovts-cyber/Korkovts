@@ -82,6 +82,7 @@ from v1142_risk import (
     shadow_reason_for as futures_shadow_reason,
     text as futures_safety_text,
     active_trades_text as futures_active_text,
+    effective_max_concurrent_live as futures_live_cap,
 )
 from spot_scanner import (
     scan as spot_scan, status as spot_scan_status,
@@ -1732,7 +1733,7 @@ async def _validate_futures_delivery(signal_id):
 
     # A second independent live trade may have appeared while Telegram was down.
     # This pending signal itself is excluded from the count.
-    if ctx.get("delivered_at") is None and futures_other_live_count(signal_id)>0:
+    if ctx.get("delivered_at") is None and futures_other_live_count(signal_id)>=max(1,int(futures_live_cap())):
         return False,"another live/pending Futures trade now owns the risk slot",int(arm_id)
 
     try:
@@ -2653,12 +2654,17 @@ async def _deliver_spot_pending(bot,forced_chat_ids=None):
                     )
                     continue
 
-                # Terminal news/event veto has priority over *transient* Futures
-                # crowding failures, but only after local price/L2/flow confirmed the
-                # candidate is still executable. This preserves the proven outbox
-                # contract: neutral news does not interfere with a valid delivery,
-                # while a fresh negative/global shock expires BUY before retryable
-                # crowding degradation can mask the terminal veto.
+                # Terminal Futures crowding is a hard invalidation and must not be
+                # masked by another terminal layer. Check EXTREME first. News still
+                # has priority over *transient* crowding degradation, preserving the
+                # outbox contract that a negative/global event expires BUY rather
+                # than leaving it retryable behind a temporarily degraded crowd feed.
+                if crowd.get("extreme"):
+                    reason="fresh Futures crowding became EXTREME"
+                    expire_spot_delivery(delivery_id,signal_id,reason)
+                    close_spot_watch(symbol,"CANCELLED",reason,signal_id)
+                    continue
+
                 if news_snapshot is None:
                     news_snapshot=await core.get_news_sentiment()
                 news=spot_assess_news(news_snapshot,base)
@@ -2677,11 +2683,6 @@ async def _deliver_spot_pending(bot,forced_chat_ids=None):
                     mark_spot_delivery_failed(
                         delivery_id,"fresh Futures crowding layer temporarily degraded"
                     )
-                    continue
-                if crowd.get("extreme"):
-                    reason="fresh Futures crowding became EXTREME"
-                    expire_spot_delivery(delivery_id,signal_id,reason)
-                    close_spot_watch(symbol,"CANCELLED",reason,signal_id)
                     continue
 
 
