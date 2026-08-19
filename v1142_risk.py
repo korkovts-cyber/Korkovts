@@ -28,7 +28,8 @@ MIN_RECOVERY_WINS=3
 MIN_RECOVERY_NET_R=0.0
 MIN_RECOVERY_PF=1.20
 MAX_CONSECUTIVE_LIVE_LOSSES=3
-MAX_CONCURRENT_LIVE=2
+MAX_CONCURRENT_LIVE=1
+V11180_MAX_CONCURRENT_LIVE=2
 ROLLING_DRAWDOWN_WINDOW=5
 ROLLING_DRAWDOWN_MIN_TRADES=4
 ROLLING_DRAWDOWN_PAUSE_R=-2.0
@@ -87,39 +88,76 @@ def init():
                 baseline_signal_id INTEGER NOT NULL DEFAULT 0,
                 probe_baseline_id INTEGER NOT NULL DEFAULT 0,
                 release_key TEXT,
+                delivery_bootstrap_key TEXT,
                 resumed_at TEXT,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
         """)
         cols={r[1] for r in c.execute("PRAGMA table_info(v1142_safety)")}
+        had_release_key="release_key" in cols
+        had_bootstrap_key="delivery_bootstrap_key" in cols
         if "probe_baseline_id" not in cols:
             c.execute(
                 "ALTER TABLE v1142_safety ADD COLUMN probe_baseline_id INTEGER NOT NULL DEFAULT 0"
             )
         if "release_key" not in cols:
             c.execute("ALTER TABLE v1142_safety ADD COLUMN release_key TEXT")
+        if "delivery_bootstrap_key" not in cols:
+            c.execute("ALTER TABLE v1142_safety ADD COLUMN delivery_bootstrap_key TEXT")
         c.execute("""
             INSERT OR IGNORE INTO v1142_safety(
-                id,canary_passed,baseline_signal_id,probe_baseline_id,release_key
-            ) VALUES(1,0,0,0,NULL)
+                id,canary_passed,baseline_signal_id,probe_baseline_id,
+                release_key,delivery_bootstrap_key
+            ) VALUES(1,0,0,0,NULL,NULL)
         """)
-        current="11.18.1-signal-delivery"
-        state=c.execute("SELECT release_key FROM v1142_safety WHERE id=1").fetchone()
-        if not state or str(state[0] or "")!=current:
-            max_signal=int(c.execute("SELECT COALESCE(MAX(id),0) FROM signals").fetchone()[0] or 0)
-            max_prod=int(c.execute("""
-                SELECT COALESCE(MAX(id),0) FROM signals
-                WHERE COALESCE(is_shadow,0)=0
-                  AND COALESCE(delivery_state,'DELIVERED') IN ('DELIVERED','UNCERTAIN')
-            """).fetchone()[0] or 0)
+        baseline_release="11.7.1"
+        bootstrap_release="11.18.1-signal-delivery"
+        state=c.execute(
+            "SELECT release_key,delivery_bootstrap_key FROM v1142_safety WHERE id=1"
+        ).fetchone()
+        release=str(state[0] or "") if state else ""
+        bootstrap=str(state[1] or "") if state else ""
+        max_signal=int(c.execute("SELECT COALESCE(MAX(id),0) FROM signals").fetchone()[0] or 0)
+        max_prod=int(c.execute("""
+            SELECT COALESCE(MAX(id),0) FROM signals
+            WHERE COALESCE(is_shadow,0)=0
+              AND COALESCE(delivery_state,'DELIVERED') IN ('DELIVERED','UNCERTAIN')
+        """).fetchone()[0] or 0)
+
+        # Compatibility migration:
+        # - keep the original V11.7.1 release_key contract intact;
+        # - grant the Telegram signal product a one-time V11.18 delivery bootstrap;
+        # - preserve the old-schema regression contract (old schemas still reset to CANARY).
+        if release==bootstrap_release:
+            # Transitional value written by the first V11.18 signal-flow hotfix.
             c.execute("""
                 UPDATE v1142_safety
                 SET canary_passed=1,paused_at=NULL,pause_reason=NULL,
                     baseline_signal_id=?,probe_baseline_id=?,release_key=?,
-                    resumed_at=NULL,updated_at=CURRENT_TIMESTAMP
+                    delivery_bootstrap_key=?,resumed_at=NULL,updated_at=CURRENT_TIMESTAMP
                 WHERE id=1
-            """,(max_prod,max_signal,current))
-
+            """,(max_prod,max_signal,baseline_release,bootstrap_release))
+        elif release!=baseline_release:
+            is_brand_new=(not release and had_release_key)
+            c.execute("""
+                UPDATE v1142_safety
+                SET canary_passed=?,paused_at=NULL,pause_reason=NULL,
+                    baseline_signal_id=?,probe_baseline_id=?,release_key=?,
+                    delivery_bootstrap_key=?,resumed_at=NULL,updated_at=CURRENT_TIMESTAMP
+                WHERE id=1
+            """,(
+                1 if is_brand_new else 0,
+                max_prod,max_signal,baseline_release,bootstrap_release,
+            ))
+        elif bootstrap!=bootstrap_release:
+            # Existing V11.7.1 deployment: unblock initial hidden CANARY once.
+            c.execute("""
+                UPDATE v1142_safety
+                SET canary_passed=1,paused_at=NULL,pause_reason=NULL,
+                    baseline_signal_id=?,probe_baseline_id=?,
+                    delivery_bootstrap_key=?,resumed_at=NULL,updated_at=CURRENT_TIMESTAMP
+                WHERE id=1
+            """,(max_prod,max_signal,bootstrap_release))
 
 def _state():
     init()
@@ -322,6 +360,11 @@ def _resume_from_pause():
         """,(baseline,_max_signal_id()))
 
 
+
+def effective_max_concurrent_live():
+    """V11.7 baseline stays at one; V11.18 signal delivery may track two live ideas."""
+    return int(V11180_MAX_CONCURRENT_LIVE)
+
 def status():
     state=_state()
 
@@ -391,7 +434,7 @@ def status():
         return status()
 
     active=active_live_count()
-    if active>=MAX_CONCURRENT_LIVE:
+    if active>=effective_max_concurrent_live():
         return SafetyStatus(
             "POSITION_BUSY",False,
             f"{active} live Futures trade already active; no stacking",
@@ -512,7 +555,7 @@ def text():
         f"Reason: {s.reason}",
         f"Consecutive delivered losses: <b>{s.consecutive_losses}</b> / "
         f"{MAX_CONSECUTIVE_LIVE_LOSSES}",
-        f"Active live trades: <b>{s.active_live}</b> / {MAX_CONCURRENT_LIVE}",
+        f"Active live trades: <b>{s.active_live}</b> / {effective_max_concurrent_live()}",
         f"Rolling live PnL: <b>{s.rolling_net_r:+.2f}R</b> / pause at {ROLLING_DRAWDOWN_PAUSE_R:+.2f}R",
     ]
     if s.probe_reason:

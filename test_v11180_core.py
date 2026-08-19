@@ -158,8 +158,10 @@ class V11180Tests(unittest.TestCase):
 
     def test_signal_bot_does_not_start_in_hidden_canary_and_allows_two_live(self):
         src=Path('v1142_risk.py').read_text()
-        self.assertIn('MAX_CONCURRENT_LIVE=2',src)
-        self.assertIn('current="11.18.1-signal-delivery"',src)
-        self.assertIn('SET canary_passed=1,paused_at=NULL,pause_reason=NULL,',src)
+        self.assertIn('MAX_CONCURRENT_LIVE=1',src)
+        self.assertIn('V11180_MAX_CONCURRENT_LIVE=2',src)
+        self.assertIn('delivery_bootstrap_key',src)
+        self.assertIn('bootstrap_release="11.18.1-signal-delivery"',src)
+        self.assertIn('effective_max_concurrent_live()',src)
 
 if __name__=='__main__': unittest.main()
