@@ -47,8 +47,11 @@ def assess(signal:Any)->StrongAssessment:
 
     rank=_f(getattr(signal,"professional_rank",0))
     support=int(evidence.get("support",getattr(signal,"evidence_support",0)) or 0)
-    market=dict(f.get("market") or getattr(signal,"market_context",{}) or {})
+    market=dict(snap.get("market") or getattr(signal,"market_context",{}) or {})
     independent_relief=bool(market.get("breadth_blocked") and market.get("independent_mode"))
+    # V11.15 baseline contract remains support>=5 in normal regimes.
+    # V11.18 may relax only the already-earned breadth-divergence independent mode
+    # to 4 independent families; this never applies to normal market regimes.
     required_support=4 if independent_relief else 5
     conflicts=int(evidence.get("conflict",getattr(signal,"evidence_conflicts",0)) or 0)
     hard=list(evidence.get("hard_conflicts") or [])
