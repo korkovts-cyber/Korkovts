@@ -1,4 +1,4 @@
-"""Korkovts Signal AI V11.19.7 · CODE-QUALITY AUDITED SIGNAL ENGINE."""
+"""Korkovts Signal AI V11.19.9 · CODE-QUALITY AUDITED SIGNAL ENGINE."""
 from __future__ import annotations
 
 # 1) Futures scanner patch before app.bot/bot_v11180 bind scan functions.
@@ -42,7 +42,7 @@ install_v11196_api_resilience()
 # 6) Hardened V11.18 remains the final execution/risk/delivery authority.
 import bot_v11180 as base
 
-APP_VERSION="11.19.7"
+APP_VERSION="11.19.9"
 base.APP_VERSION=APP_VERSION
 base.config.APP_VERSION=APP_VERSION
 base.core.APP_VERSION=APP_VERSION
@@ -80,7 +80,7 @@ async def _delivery_spot_crowding(symbol):
 base.spot_assess_news=_delivery_spot_news
 base.spot_fresh_derivatives_risk=_delivery_spot_crowding
 
-# 7) V11.19.7 scan-lock scheduler parity.
+# 7) V11.19.9 scan-lock scheduler parity.
 # A legitimate full-universe scan may take close to its bounded ~3-minute
 # budget. The previous 90s wait was incompatible with that design.
 async def _run_automatic_scan_v11194(context,scanner_fn,label):
@@ -136,7 +136,7 @@ async def _run_automatic_scan_v11194(context,scanner_fn,label):
                     triggered+=1
 
         base.core.log.info(
-            "V11.19.7 automatic %s setups=%s armed=%s cancelled=%s "
+            "V11.19.9 automatic %s setups=%s armed=%s cancelled=%s "
             "entry_now=%s waited=%ss",
             label,len(fresh),armed,cancelled,triggered,waited,
         )
@@ -146,7 +146,7 @@ async def _run_automatic_scan_v11194(context,scanner_fn,label):
                 fresh_setups=len(fresh),triggered=triggered,
             )
     except Exception as exc:
-        base.core.log.exception("V11.19.7 automatic %s scan failed",label)
+        base.core.log.exception("V11.19.9 automatic %s scan failed",label)
         if heartbeat and chats:
             await base._send_auto_heartbeat(
                 context.bot,chats,base.scanner.scan_status().get("main",{}),
@@ -154,6 +154,84 @@ async def _run_automatic_scan_v11194(context,scanner_fn,label):
             )
 
 base.core._run_automatic_scan=_run_automatic_scan_v11194
+
+
+# 8) V11.19.9 truthful scan diagnostics.
+# Legacy manual handlers collapsed every exception into "mandatory source unavailable".
+# Keep safety fail-closed, but surface the actual stage/reason to Telegram.
+
+def _v11199_scan_error_text(exc, diagnostics=None, label="Futures"):
+    d=dict(diagnostics or {})
+    reason=str(d.get("reason") or d.get("source_error") or str(exc) or type(exc).__name__)
+    reason=reason.strip() or type(exc).__name__
+
+    # Prefer structured stage diagnostics when available.
+    if d.get("source_stage")=="ERROR":
+        src=d.get("source_error") or reason
+        return f"⚠️ {label} scan не завершён.\nПричина: {src}"
+
+    if "deep shortlist deadline coverage incomplete" in reason:
+        return f"⚠️ {label} scan не завершён.\nПричина: {reason}\nПолный deep-analysis не успел завершиться в допустимое окно."
+
+    if "fast derivatives screen coverage incomplete" in reason:
+        return f"⚠️ {label} scan не завершён.\nПричина: {reason}\nБыстрый derivatives-screen получил недостаточное покрытие."
+
+    if "rate-limit cooldown" in reason.lower():
+        return f"⚠️ {label} scan временно отложен.\nПричина: {reason}"
+
+    if "timeout" in reason.lower():
+        return f"⚠️ {label} scan не завершён.\nTimeout: {reason}"
+
+    return f"⚠️ {label} scan не завершён.\nПричина: {type(exc).__name__}: {reason}"
+
+
+# Wrap legacy manual PRIME FUTURES command with truthful exception output.
+_original_prime_scan_cmd=getattr(base,"scan_cmd_v1142",None) or getattr(base,"scan_cmd",None)
+
+async def _prime_scan_cmd_v11199(update,context):
+    msg=update.effective_message
+    try:
+        await msg.reply_text(
+            "🔎 Ищу сильные Futures-сетапы.\n"
+            "Найденные кандидаты сначала перейдут в ARMED; вход будет отдельным 🚨 ENTRY NOW.",
+            reply_markup=base.main_menu()
+        )
+        results=await base.core.scan()
+        await base.core._send_results(
+            context.bot,update.effective_chat.id,results,
+            diagnostics=base.core.scan_status().get("main")
+        )
+    except Exception as exc:
+        base.core.log.exception("V11.19.9 manual market scan failed")
+        text=_v11199_scan_error_text(
+            exc,base.core.scan_status().get("main"),"Futures"
+        )
+        await msg.reply_text(text,reply_markup=base.main_menu())
+
+if hasattr(base,"scan_cmd_v1142"):
+    base.scan_cmd_v1142=_prime_scan_cmd_v11199
+if hasattr(base,"scan_cmd"):
+    base.scan_cmd=_prime_scan_cmd_v11199
+
+
+# Wrap short scan when that public handler exists.
+if hasattr(base,"short_scan_cmd_v1142"):
+    async def _short_scan_cmd_v11199(update,context):
+        msg=update.effective_message
+        try:
+            results=await base.core.scan_short()
+            await base.core._send_results(
+                context.bot,update.effective_chat.id,results,
+                diagnostics=base.core.scan_status().get("short")
+            )
+        except Exception as exc:
+            base.core.log.exception("V11.19.9 manual short scan failed")
+            text=_v11199_scan_error_text(
+                exc,base.core.scan_status().get("short"),"FAST Futures"
+            )
+            await msg.reply_text(text,reply_markup=base.main_menu())
+    base.short_scan_cmd_v1142=_short_scan_cmd_v11199
+
 
 if __name__=="__main__":
     base.core.main()

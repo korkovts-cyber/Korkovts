@@ -14,6 +14,7 @@ i=Path("v11191_integrity.py").read_text()
 b=Path("bot_v11191.py").read_text()
 api=Path("v11196_api_resilience.py").read_text()
 sources=Path("v11197_sources.py").read_text()
+screen=Path("v11198_deep_screen.py").read_text()
 
 checks={
  "Futures entire liquid universe ranked":"full_universe_ranked" in f,
@@ -50,8 +51,17 @@ checks={
  "ticker short cache":"TICKER_CACHE_MAX_SEC" in sources and "75" in sources,
  "Mandatory source priority":'path.endswith("/exchangeInfo")' in api and 'path.endswith("/ticker/24hr")' in api,
  "Source diagnostics":"source_meta" in f and "mandatory_sources" in f and "source_error" in f,
+ "Two-stage deep engine":"quick_deep_screen" in f and "select_full_deep" in f,
+ "All 36 fast screened":"deep_screen_complete" in f and "deep_screen_coverage" in f,
+ "Full deep reduced target":"FULL_DEEP_TARGET" in screen and '"14"' in screen,
+ "Fast screen bulk premium":"premiumIndex" in screen and "_premium_bulk" in screen,
+ "Fast screen OI only":"openInterest" in screen and "get_derivatives_snapshot" not in screen,
+ "Full snapshot remains authoritative":"_deep_one" in f and "legacy.get_derivatives_snapshot" in f,
+ "Truthful manual diagnostics":"_v11199_scan_error_text" in b and "_prime_scan_cmd_v11199" in b,
+ "Deep deadline diagnostic":"deep shortlist deadline coverage incomplete" in b,
+ "Fast screen diagnostic":"fast derivatives screen coverage incomplete" in b,
 }
 failed=[k for k,v in checks.items() if not v]
 if failed:
-    raise SystemExit("V11.19.7 RELEASE CHECK FAILED: "+", ".join(failed))
-print("V11.19.7 RELEASE CHECK: OK")
+    raise SystemExit("V11.19.9 RELEASE CHECK FAILED: "+", ".join(failed))
+print("V11.19.9 RELEASE CHECK: OK")

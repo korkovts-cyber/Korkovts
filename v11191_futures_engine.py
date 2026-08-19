@@ -1,4 +1,4 @@
-"""Korkovts V11.19.6 · CODE-QUALITY AUDITED FULL-UNIVERSE FUTURES ENGINE.
+"""Korkovts V11.19.8 · CODE-QUALITY AUDITED FULL-UNIVERSE FUTURES ENGINE.
 
 Goal:
 - evaluate the whole liquid Binance USD-M perpetual universe before any hard technical gate;
@@ -32,13 +32,14 @@ from app.market import (
 from app.research import annotate_correlation_clusters
 import app.scanner as legacy
 from v11197_sources import mandatory_sources, status as mandatory_source_status
+from v11198_deep_screen import screen as quick_deep_screen, select_full_deep, FULL_DEEP_TARGET, MIN_SCREEN_COVERAGE
 
 FULL_SCAN_BUDGET_SEC = max(120, min(240, int(os.getenv("V11194_FULL_SCAN_BUDGET_SEC", "175"))))
 SOURCE_STAGE_TIMEOUT_SEC = max(15, min(45, int(os.getenv("V11194_SOURCE_TIMEOUT_SEC", "30"))))
 FRAME_STAGE_MAX_SEC = max(45, min(120, int(os.getenv("V11194_FRAME_STAGE_MAX_SEC", "90"))))
 FRAME_REQUEST_TIMEOUT_SEC = max(8, min(30, int(os.getenv("V11194_FRAME_REQUEST_TIMEOUT_SEC", "22"))))
 MIN_FRAME_COVERAGE = max(.80, min(1.0, float(os.getenv("V11194_MIN_FRAME_COVERAGE", ".95"))))
-DEEP_CONCURRENCY = max(1, min(5, int(os.getenv("V11191_DEEP_CONCURRENCY", "3"))))
+DEEP_CONCURRENCY = max(2, min(5, int(os.getenv("V11198_DEEP_CONCURRENCY", "4"))))
 FRAME_CONCURRENCY = max(1, int(os.getenv("V11190_FRAME_CONCURRENCY", "5")))
 MAX_RETURN_CANDIDATES = max(8, min(24, int(os.getenv("V11191_MAX_RETURN_CANDIDATES", "20"))))
 DEEP_SHORTLIST = max(24, min(48, int(os.getenv("V11191_FUTURES_DEEP_SHORTLIST", "36"))))
@@ -552,17 +553,40 @@ async def _run(kind):
         d["non_actionable_low_liquidity"]=max(0,len(symbols)-len(liquid_ranked))
         _last[kind]=copy.deepcopy(d)
 
-        # Stage 2: expensive derivatives checks. The overall deadline is real:
-        # unfinished work is cancelled and cannot hold scan-lock past budget.
+        # Stage 2A: ALL 36 names receive a low-cost derivatives screen.
+        # This is ranking only; no trade can bypass the full production snapshot.
+        screened,screen_diag=await quick_deep_screen(deep_rows,tickers)
+        d["deep_screen"]=screen_diag
+        d["deep_screen_complete"]=int(screen_diag.get("complete",0) or 0)
+        d["deep_screen_coverage"]=float(screen_diag.get("coverage",0) or 0)
+        _last[kind]=copy.deepcopy(d)
+        if d["deep_screen_coverage"] < MIN_SCREEN_COVERAGE:
+            raise RuntimeError(
+                f"fast derivatives screen coverage incomplete: "
+                f"{d['deep_screen_complete']}/{len(deep_rows)}"
+            )
+
+        # Stage 2B: only the strongest screened names receive the expensive
+        # 9-component production snapshot. Direction allocation is adaptive.
+        full_selected=select_full_deep(screened,FULL_DEEP_TARGET,3)
+        full_rows=[row for meta,row in full_selected]
+        d["deep_full_target"]=len(full_rows)
+        d["deep_full_symbols"]=[row[0] for row in full_rows]
+        d["deep_full_long"]=sum(float(row[4])>=float(row[5]) for row in full_rows)
+        d["deep_full_short"]=sum(float(row[4])<float(row[5]) for row in full_rows)
+        _last[kind]=copy.deepcopy(d)
+
         deep_sem=asyncio.Semaphore(DEEP_CONCURRENCY)
         task_map={
             asyncio.create_task(
                 _deep_one(row,kind,analysis_state,news,adl_risks,min_score,deep_sem)
             ): idx
-            for idx,row in enumerate(deep_rows)
+            for idx,row in enumerate(full_rows)
         }
+        # Preserve a small tail for final ranking/correlation/UI.
+        deep_timeout=max(1.0,remaining(8.0))
         done,pending=await asyncio.wait(
-            task_map.keys(),timeout=max(1.0,remaining())
+            task_map.keys(),timeout=deep_timeout
         )
         for task in pending:
             task.cancel()
@@ -570,7 +594,7 @@ async def _run(kind):
             await asyncio.gather(*pending,return_exceptions=True)
         d["deep_deadline_cancelled"]=len(pending)
 
-        results=[None]*len(deep_rows)
+        results=[None]*len(full_rows)
         for task in done:
             idx=task_map[task]
             try:
@@ -587,7 +611,7 @@ async def _run(kind):
 
         live=[]
         frames_for_corr={}
-        for idx,(row,outcome) in enumerate(zip(deep_rows,results),1):
+        for idx,(row,outcome) in enumerate(zip(full_rows,results),1):
             signal,reason,payload=outcome
             if reason=="DERIVATIVES_INCOMPLETE":
                 d["derivatives_incomplete"]+=1
@@ -611,7 +635,7 @@ async def _run(kind):
                         "geometry_recovered":bool(sa.get("geometry_recovered")),
                     })
             if signal is not None:
-                signal=_decorate(signal,row[4],row[5],idx,len(deep_rows))
+                signal=_decorate(signal,row[4],row[5],idx,len(full_rows))
                 live.append(signal)
                 frames_for_corr[row[0]]=row[2]
             if idx % 6 == 0:
@@ -619,14 +643,14 @@ async def _run(kind):
 
         # If deadline prevented a material part of deep shortlist from being
         # checked, report an incomplete scan rather than "no signals".
-        completed_deep=len(deep_rows)-len(pending)
+        completed_deep=len(full_rows)-len(pending)
         d["deep_completed_or_rejected"]=completed_deep
-        deep_coverage=completed_deep/max(1,len(deep_rows))
+        deep_coverage=completed_deep/max(1,len(full_rows))
         d["deep_coverage"]=round(deep_coverage,4)
         if pending and deep_coverage < .70:
             raise RuntimeError(
                 f"deep shortlist deadline coverage incomplete: "
-                f"{completed_deep}/{len(deep_rows)}"
+                f"{completed_deep}/{len(full_rows)}"
             )
 
         live.sort(

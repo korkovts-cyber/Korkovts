@@ -2,7 +2,7 @@ import ast
 import unittest
 from pathlib import Path
 
-class V11197Contracts(unittest.TestCase):
+class V11199Contracts(unittest.TestCase):
     def test_futures_full_universe_before_deep(self):
         s=Path("v11191_futures_engine.py").read_text()
         self.assertIn("full_universe_ranked",s)
@@ -216,6 +216,59 @@ class V11197Contracts(unittest.TestCase):
         self.assertIn("mandatory Futures source stage failed",s)
         self.assertIn("source_error",s)
         self.assertIn("source_meta",s)
+
+    def test_two_stage_deep_screens_all_wide_candidates(self):
+        s=Path("v11191_futures_engine.py").read_text()
+        self.assertIn("quick_deep_screen(deep_rows,tickers)",s)
+        self.assertIn("deep_screen_complete",s)
+        self.assertIn("deep_screen_coverage",s)
+
+    def test_fast_screen_is_low_request_weight(self):
+        s=Path("v11198_deep_screen.py").read_text()
+        self.assertIn("/fapi/v1/premiumIndex",s)
+        self.assertIn("/fapi/v1/openInterest",s)
+        self.assertNotIn("basis",s)
+        self.assertNotIn("globalLongShort",s)
+        self.assertNotIn("depth",s)
+
+    def test_full_deep_target_is_bounded(self):
+        s=Path("v11198_deep_screen.py").read_text()
+        self.assertIn("FULL_DEEP_TARGET",s)
+        self.assertIn('"14"',s)
+        self.assertIn("max(10,min(18",s.replace(" ",""))
+
+    def test_fast_screen_never_delivers_signal(self):
+        s=Path("v11198_deep_screen.py").read_text()
+        self.assertNotIn("Signal(",s)
+        self.assertIn("No signal may be delivered",s)
+
+    def test_full_production_snapshot_still_runs(self):
+        s=Path("v11191_futures_engine.py").read_text()
+        self.assertIn("legacy.get_derivatives_snapshot",s)
+        self.assertIn("_deep_one",s)
+
+    def test_full_deep_is_adaptive_not_50_50(self):
+        s=Path("v11198_deep_screen.py").read_text()
+        self.assertIn("dominant=",s)
+        self.assertIn("min_opposite",s)
+
+    def test_manual_scan_diagnostics_are_truthful(self):
+        s=Path("bot_v11191.py").read_text()
+        self.assertIn("_v11199_scan_error_text",s)
+        self.assertIn("deep shortlist deadline coverage incomplete",s)
+        self.assertIn("fast derivatives screen coverage incomplete",s)
+        self.assertIn("rate-limit cooldown",s)
+
+    def test_manual_prime_handler_surfaces_scan_reason(self):
+        s=Path("bot_v11191.py").read_text()
+        self.assertIn("_prime_scan_cmd_v11199",s)
+        self.assertIn('base.core.scan_status().get("main")',s)
+        self.assertIn("manual market scan failed",s)
+
+    def test_short_handler_surfaces_scan_reason(self):
+        s=Path("bot_v11191.py").read_text()
+        self.assertIn("_short_scan_cmd_v11199",s)
+        self.assertIn('base.core.scan_status().get("short")',s)
 
 if __name__=="__main__":
     unittest.main()
