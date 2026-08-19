@@ -3154,9 +3154,12 @@ async def post_init_v112(application):
     await _original_post_init(application)
     await db_maintenance_job()
 
-    # Build the research models before polling begins, but on worker threads so
-    # CPU-heavy walk-forward validation never stalls the asyncio loop.
-    await meta_refresh_job()
+    # Telegram polling must become responsive immediately after post_init.
+    # Build CPU-heavy walk-forward models via JobQueue after polling starts;
+    # until then Meta Precision remains in its normal LEARNING/fallback state.
+    application.job_queue.run_once(
+        meta_refresh_job,when=5,name="v11130-meta-bootstrap"
+    )
 
     application.add_handler(CommandHandler("spot",spot_cmd))
     _live_task=asyncio.create_task(live_monitor(),name="v114-binance-live-market")
