@@ -1,4 +1,4 @@
-"""V11.20.6 · Binance API resilience overlay.
+"""V11.21.1 · Binance API resilience overlay.
 
 Prevents full-universe research traffic from starving production health probes,
 adds proactive request-weight headroom, and makes health diagnostics distinguish
@@ -9,13 +9,14 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+import httpx
 from datetime import datetime, timezone
 
 import v1141_governor as governor
 import v112_health as health
 
-ANALYSIS_CONCURRENCY=max(4,min(6,int(os.getenv("V11200_ANALYSIS_CONCURRENCY","5"))))
-SOFT_WEIGHT_CEILING=max(1200,min(1800,int(os.getenv("V11200_SOFT_WEIGHT_CEILING","1500"))))
+ANALYSIS_CONCURRENCY=max(3,min(5,int(os.getenv("V11200_ANALYSIS_CONCURRENCY","4"))))
+SOFT_WEIGHT_CEILING=max(900,min(1400,int(os.getenv("V11200_SOFT_WEIGHT_CEILING","1150"))))
 RECENT_HEALTH_GRACE_SEC=max(30,min(180,int(os.getenv("V11196_HEALTH_GRACE_SEC","90"))))
 _analysis_sem=asyncio.Semaphore(ANALYSIS_CONCURRENCY)
 _original_governed_get=governor.governed_get
@@ -24,28 +25,33 @@ _last_good={"at":0.0,"latency":None,"candle_age":None,"skew":None}
 
 
 def _critical(path,params=None):
-    path=str(path or "")
-    params=dict(params or {})
-    if path.endswith("/time") or path.endswith("/exchangeInfo") or path.endswith("/ticker/24hr"):
-        return True
-    return (
-        path.endswith("/klines")
-        and str(params.get("symbol") or "").upper()=="BTCUSDT"
-        and str(params.get("interval") or "")=="1m"
-    )
+    path=str(path or ""); params=dict(params or {})
+    if path.endswith("/time"): return True
+    return (path.endswith("/klines")
+            and str(params.get("symbol") or "").upper()=="BTCUSDT"
+            and str(params.get("interval") or "")=="1m"
+            and int(params.get("limit") or 0)<=10)
 
 
-async def _soft_weight_guard():
+def _estimated_weight(path,params=None):
+    path=str(path or ""); p=dict(params or {})
+    if path.endswith("/ticker/24hr"): return 1 if p.get("symbol") else 40
+    if path.endswith("/premiumIndex"): return 1 if p.get("symbol") else 10
+    if path.endswith("/aggTrades"): return 20
+    if path.endswith("/depth"):
+        limit=int(p.get("limit") or 100); return 5 if limit<=100 else (10 if limit<=500 else 20)
+    if path.endswith("/klines"):
+        limit=int(p.get("limit") or 500); return 1 if limit<100 else (2 if limit<500 else (5 if limit<=1000 else 10))
+    return 1
+
+
+async def _soft_weight_guard(path=None,params=None):
     now=time.time(); minute=int(now//60)
-    if _budget["minute"]!=minute:
-        return
-    used=int(_budget.get("last_used",0) or 0)
-    if used<SOFT_WEIGHT_CEILING:
-        return
-    # Leave deliberate headroom for health, ENTRY NOW, Fast Radar and delivery
-    # revalidation. Binance minute windows are UTC wall-clock aligned.
-    delay=max(.05,60.25-(now%60))
-    _budget["soft_waits"]+=1
+    if _budget["minute"]!=minute: return
+    used=max(int(_budget.get("last_used",0) or 0),int(governor._state.get("last_used_weight_1m",0) or 0))
+    reserve=_estimated_weight(path,params)
+    if used + reserve < SOFT_WEIGHT_CEILING: return
+    delay=max(.05,60.25-(now%60)); _budget["soft_waits"]+=1
     await asyncio.sleep(delay)
 
 
@@ -57,12 +63,26 @@ async def governed_get(path,params=None):
         result=await _original_governed_get(path,params)
     else:
         async with _analysis_sem:
-            await _soft_weight_guard()
+            await _soft_weight_guard(path,params)
             result=await _original_governed_get(path,params)
     _budget["minute"]=int(time.time()//60)
     _budget["last_used"]=int(governor._state.get("last_used_weight_1m",0) or 0)
     return result
 
+
+
+async def _telemetry_raw_get(path,params=None):
+    client=governor.market._http_client(); base=str(getattr(governor.market,"BINANCE_BASE_URL",""))
+    response=await client.get(f"{base}{path}",params=params)
+    used=response.headers.get("x-mbx-used-weight-1m") or response.headers.get("X-MBX-USED-WEIGHT-1M")
+    if used:
+        try:
+            value=int(used); governor._state["last_used_weight_1m"]=value
+            _budget["minute"]=int(time.time()//60); _budget["last_used"]=value
+        except Exception: pass
+    if response.status_code in (418,429):
+        raise httpx.HTTPStatusError("Binance rate limit",request=response.request,response=response)
+    response.raise_for_status(); return response.json()
 
 def _fmt_metric(value,suffix):
     try:
@@ -157,7 +177,7 @@ def text(h):
     skew="N/A" if h.server_clock_skew_ms<0 else f"{h.server_clock_skew_ms/1000:+.1f} sec"
     checked=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     return (
-        "📡 <b>PRODUCTION HEALTH · V11.20.6</b>\n━━━━━━━━━━━━━━━━━━\n"
+        "📡 <b>PRODUCTION HEALTH · V11.21.1</b>\n━━━━━━━━━━━━━━━━━━\n"
         f"Проверено: <b>{checked}</b>\n"
         f"{icon} Статус: <b>{h.status}</b>\n"
         f"REST latency: <b>{lat}</b>\n"
@@ -172,8 +192,7 @@ def text(h):
 
 
 def install():
-    # v1141_governor.install() is called later by bot_v11180 and resolves the
-    # module global governed_get at call time, so patching here is early enough.
+    governor._raw_get=_telemetry_raw_get
     governor.governed_get=governed_get
     health.check=check
     health.text=text

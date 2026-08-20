@@ -1,4 +1,4 @@
-"""V11.19.5 · CODE-QUALITY AUDITED FULL-UNIVERSE Spot signal engine.
+"""V11.21 · CODE-QUALITY AUDITED FULL-UNIVERSE Spot signal engine.
 
 Principles:
 - every eligible Binance Spot/USDT symbol receives daily discovery;
@@ -162,7 +162,49 @@ def analyze(symbol,base_asset,daily,frame4h,frame1h,relative_percentile,excess_b
         "crowding_auxiliary_degraded":bool((derivatives or {}).get("degraded") and not d.get("degraded")),
     })
     if independent:
-        result.reasons.append("V11.19.5 independent recovery leader")
+        result.reasons.append("V11.21 independent recovery leader")
+
+    if str(getattr(result,"status","")).upper()=="WATCH":
+        snap=dict(getattr(result,"feature_snapshot",{}) or {})
+        market_snap=dict(snap.get("market") or {})
+        micro_snap=dict(snap.get("micro") or {})
+        news_snap=dict(snap.get("news") or {})
+        crowd_snap=dict(snap.get("derivatives") or {})
+        daily_snap=dict(snap.get("daily") or {})
+        h4_snap=dict(snap.get("4h") or {})
+        live=_finite(snap.get("live_price"))
+        in_zone=float(result.entry_low)<=live<=float(result.entry_high)
+        regime=str(market_snap.get("regime") or result.market_regime).upper()
+        trend4=_finite(h4_snap.get("ema20"))>_finite(h4_snap.get("ema50"))
+        no_hard=(
+            regime!="BEAR"
+            and not bool(market_snap.get("risk_off"))
+            and not bool(market_snap.get("dispersion_risk"))
+            and not bool(news_snap.get("block"))
+            and not bool(news_snap.get("recent_negative"))
+            and not bool(news_snap.get("global_breaking"))
+            and not bool(crowd_snap.get("extreme"))
+            and bool(micro_snap.get("healthy"))
+            and _finite(micro_snap.get("spread_bps"),999)<=6.0
+            and _finite(micro_snap.get("impact_5k_bps"),999)<=15.0
+            and _finite(micro_snap.get("book_imbalance_20bps"))>=-.30
+            and _finite(micro_snap.get("buy_share"),.5)>=.50
+            and _finite(micro_snap.get("closed_buy_share_15m"),.5)>=.49
+        )
+        quality=(
+            float(result.score)>=78.0
+            and float(result.relative_percentile)>=70.0
+            and _finite(daily_snap.get("ret14"))>0
+            and _finite(daily_snap.get("ret30"))>0
+            and _finite(daily_snap.get("path_eff14"))>=.25
+            and trend4 and in_zone
+        )
+        if no_hard and quality:
+            result.status="BUY"
+            result.reasons.append("V11.21 BUY READY: trend + zone + execution + non-opposing flow")
+            result.feature_snapshot.setdefault("spot_v11210",{}).update({
+                "buy_ready_relief":True,"rule":"strong WATCH in exact zone; no hard conflict",
+            })
     return result
 
 
@@ -194,7 +236,7 @@ def spot_evidence(signal):
     hard_conflicts=tuple(
         f"{x.name}: {x.detail}" for x in new if x.state=="CONFLICT" and x.hard
     )
-    min_support=4 if independent else 5
+    min_support=3 if independent else 4
     eligible=(not hard_conflicts and support>=min_support and conflict<=1)
     summary=f"{support} independent families support · {conflict} conflict"
     out=evidence_mod.Audit(
@@ -274,7 +316,7 @@ async def _deep(symbol,row,rel_pct,excess,market,news_snapshot,fut_set,futures_o
             return None,None
 
         audit=spot_evidence(normalized)
-        penalty=max(0.0,(6-int(audit.support))*1.2+int(audit.conflict)*2.0)
+        penalty=max(0.0,(5-int(audit.support))*1.0+int(audit.conflict)*2.0)
         normalized.feature_snapshot.setdefault("evidence_v117",{})["score_penalty"]=penalty
         if penalty:
             normalized.score=max(0.0,float(normalized.score)-penalty)
@@ -295,7 +337,7 @@ async def _deep(symbol,row,rel_pct,excess,market,news_snapshot,fut_set,futures_o
         }
         return normalized,None
     except Exception as exc:
-        log.warning("V11.19.5 Spot deep failed %s: %s",symbol,exc)
+        log.warning("V11.21 Spot deep failed %s: %s",symbol,exc)
         return None,f"{symbol}: {type(exc).__name__}: {exc}"
 
 
@@ -399,7 +441,7 @@ async def scan(force=False):
                 fut_set=set(await legacy.futures_symbols())
                 futures_overlay_ok=bool(fut_set)
             except Exception as exc:
-                log.warning("V11.19.5 Spot futures overlay unavailable: %s",exc)
+                log.warning("V11.21 Spot futures overlay unavailable: %s",exc)
                 fut_set=set()
                 futures_overlay_ok=False
             _last["futures_overlay_ok"]=futures_overlay_ok

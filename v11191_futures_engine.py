@@ -1,4 +1,4 @@
-"""Korkovts V11.20.2 · CODE-QUALITY AUDITED FULL-UNIVERSE FUTURES ENGINE.
+"""Korkovts V11.21 · CODE-QUALITY AUDITED FULL-UNIVERSE FUTURES ENGINE.
 
 Goal:
 - evaluate the whole liquid Binance USD-M perpetual universe before any hard technical gate;
@@ -22,6 +22,7 @@ from app.config import (
 )
 from app.db import calibration_penalty
 from app.indicators import enrich
+from app.strategy import Signal, _strength_score
 from app.liquidations import snapshot as liquidation_snapshot
 from app.market import (
     get_adl_risks,
@@ -85,6 +86,7 @@ def _diag(kind):
         "top_short_watch": [],
         "rejections": {},
         "error_examples": [],
+        "momentum_fallback": 0,
     }
 
 
@@ -279,6 +281,90 @@ async def _frames(symbol, kind, sem):
         return symbol, None, None, None, exc
 
 
+def _momentum_fallback(symbol,timeframe,base,higher,lower,side,d,market_context,news,min_score):
+    try:
+        b=enrich(base); h=enrich(higher); l=enrich(lower)
+        if len(b)<80 or len(h)<80 or len(l)<50: return None
+        a,p=b.iloc[-1],b.iloc[-2]; q=h.iloc[-1]; z=l.iloc[-1]
+        price=_f(a.close); atr=_f(a.atr)
+        if price<=0 or atr<=0: return None
+        side=str(side).upper(); long=side=="LONG"
+        dist=(price-_f(a.ema20))/atr
+        adx=_f(a.adx); eff=_f(a.efficiency20); rsi=_f(a.rsi,50)
+        spread=_f(d.get("spread_bps"),999); taker=_f(d.get("taker_ratio"),1)
+        oi_change=_f(d.get("oi_change_pct")); funding=_f(d.get("funding"))
+        crowd=_f(d.get("global_ls"),1); basis=_f(d.get("basis_bps"))
+        adl=str(d.get("adl_risk","unknown")).lower(); adl_fresh=bool(d.get("adl_fresh",False))
+        bias=str((market_context or {}).get("bias") or "NEUTRAL").upper()
+        independent=bool((market_context or {}).get("independent_mode"))
+        if long:
+            structure=(a.ema20>a.ema50>a.ema200 and q.ema20>q.ema50 and q.close>q.ema200
+                       and z.close>z.ema20 and z.macd_hist>=0 and a.plus_di>a.minus_di and a.macd_hist>0)
+            flow_ok=taker>=0.99; regime_ok=bias in ("LONG","NEUTRAL") or independent
+            crowd_ok=crowd<1.90 and basis<22 and funding<=.0012
+            extension_ok=.45<=dist<=2.60 and rsi<78
+        else:
+            structure=(a.ema20<a.ema50<a.ema200 and q.ema20<q.ema50 and q.close<q.ema200
+                       and z.close<z.ema20 and z.macd_hist<=0 and a.minus_di>a.plus_di and a.macd_hist<0)
+            flow_ok=taker<=1.01; regime_ok=bias in ("SHORT","NEUTRAL") or independent
+            crowd_ok=crowd>.55 and basis>-22 and funding>=-.0012
+            extension_ok=-2.60<=dist<=-.45 and rsi>22
+        hard_ok=(bool(d.get("deep_data")) and structure and flow_ok and regime_ok and crowd_ok
+                 and extension_ok and spread<=5.0 and adl in ("low","medium") and adl_fresh
+                 and oi_change>=-1.0 and adx>=22 and eff>=.22)
+        if not hard_ok: return None
+
+        if long:
+            low=price-.28*atr; high=price+.06*atr; entry=high; stop=entry-1.35*atr
+            risk=entry-stop; tps=(entry+risk,entry+2*risk,entry+3*risk)
+        else:
+            low=price-.06*atr; high=price+.28*atr; entry=low; stop=entry+1.35*atr
+            risk=stop-entry; tps=(entry-risk,entry-2*risk,entry-3*risk)
+
+        soft=82.0+min(8.0,max(0.0,adx-22)*.5)+min(5.0,max(0.0,eff-.22)*12)
+        soft+=3.0 if (taker>=1.03 if long else taker<=.97) else 0.0
+        raw=max(float(min_score),soft)
+        reasons=[
+            "V11.21 momentum-continuation lane",
+            f"HTF trend aligned · ADX {adx:.0f} · efficiency {eff:.2f}",
+            f"distance EMA20 {dist:+.2f} ATR",
+            f"taker {taker:.2f} · OI {oi_change:+.1f}% · spread {spread:.1f}bps",
+            "entry corridor allows controlled retest; do not chase outside zone",
+        ]
+        fs={
+            "decision":{"side":side,"setup":"MOMENTUM CONTINUATION RETEST","threshold":float(min_score),
+                        "raw_long":raw if long else 0,"raw_short":raw if not long else 0,"score_gap":20.0},
+            "technical":{"close":price,"atr":atr,"atr_pct":_f(a.atr_pct),"adx":adx,
+                         "plus_di":_f(a.plus_di),"minus_di":_f(a.minus_di),"rsi":rsi,
+                         "macd_hist":_f(a.macd_hist),"efficiency20":eff,
+                         "distance_ema20_atr":dist,"taker_imbalance10":_f(a.taker_imbalance10)},
+            "derivatives":{"funding":funding,"open_interest":_f(d.get("open_interest")),
+                           "oi_change_pct":oi_change,"price_change_pct":_f(d.get("price_change_pct")),
+                           "taker_ratio":taker,"global_long_short":crowd,
+                           "top_position_long_short":_f(d.get("top_position_ls"),1),
+                           "top_position_change_pct":_f(d.get("top_position_change_pct")),
+                           "book_imbalance":_f(d.get("book_imbalance")),"spread_bps":spread,
+                           "basis_bps":basis,"adl_risk":adl,
+                           "adl_age_minutes":_f(d.get("adl_age_minutes"),9999),
+                           "data_quality":int(d.get("data_quality",0) or 0),
+                           "data_quality_total":int(d.get("data_quality_total",9) or 9)},
+            "news":dict(news or {}),"market":dict(market_context or {}),
+            "v11210":{"fallback":True,"reason":"exact geometry missed strong trend"},
+        }
+        return Signal(
+            symbol,timeframe,side,_strength_score(raw),low,high,stop,tps[0],tps[1],tps[2],2.0,reasons,
+            funding=funding,open_interest=_f(d.get("open_interest")),volatility_pct=_f(a.atr_pct),
+            leverage=1,setup_type="MOMENTUM CONTINUATION RETEST",
+            review_window="1 час" if timeframe=="15M" else "4 часа",
+            data_quality=int(d.get("data_quality",0) or 0),
+            data_quality_total=int(d.get("data_quality_total",9) or 9),
+            estimated_cost_r=price*.0012/max(risk,1e-12),adl_risk=adl,
+            market_context=dict(market_context or {}),feature_snapshot=fs,
+        )
+    except Exception:
+        return None
+
+
 async def _deep_one(row, kind, market_context, news, adl_risks, min_score, sem):
     symbol, lower, base, higher, soft_l, soft_s = row
     try:
@@ -306,23 +392,39 @@ async def _deep_one(row, kind, market_context, news, adl_risks, min_score, sem):
             market_context.get("bias"),d,legacy.for_symbol(news,symbol),market_context,
             audit=strategy_audit
         )
+        fallback_used=False
         if result is None:
+            inferred="LONG" if float(soft_l)>=float(soft_s) else "SHORT"
+            result=_momentum_fallback(
+                symbol,timeframe,base,higher,lower,inferred,d,market_context,
+                legacy.for_symbol(news,symbol),min_score
+            )
+            if result is None:
+                d["_strategy_audit"]=strategy_audit
+                return None,"FINAL_STRATEGY_REJECT",d
+            fallback_used=True
             d["_strategy_audit"]=strategy_audit
-            return None,"FINAL_STRATEGY_REJECT",d
+            d["_v11210_fallback"]=True
 
         side = str(getattr(result,"side","") or "").upper()
         penalty = max(0.0,float(calibration_penalty(symbol,side,timeframe) or 0))
         if penalty>0:
             threshold=min(95.0,float(min_score)+penalty)
-            strategy_audit={}
-            result = legacy.analyze(
-                symbol,timeframe,base,higher,threshold,lower,
-                market_context.get("bias"),d,legacy.for_symbol(news,symbol),market_context,
-                audit=strategy_audit
-            )
-            if result is None:
-                d["_strategy_audit"]=strategy_audit
-                return None,"CALIBRATION_REJECT",d
+            if fallback_used:
+                raw=float((result.feature_snapshot.get("decision") or {}).get(
+                    "raw_long" if side=="LONG" else "raw_short",0) or 0)
+                if raw<threshold:
+                    return None,"CALIBRATION_REJECT",d
+            else:
+                strategy_audit={}
+                result = legacy.analyze(
+                    symbol,timeframe,base,higher,threshold,lower,
+                    market_context.get("bias"),d,legacy.for_symbol(news,symbol),market_context,
+                    audit=strategy_audit
+                )
+                if result is None:
+                    d["_strategy_audit"]=strategy_audit
+                    return None,"CALIBRATION_REJECT",d
         if kind != "main":
             result.expected_window = "30 минут–4 часа"
         return result, "", d
@@ -640,6 +742,8 @@ async def _run(kind):
                         "geometry_recovered":bool(sa.get("geometry_recovered")),
                     })
             if signal is not None:
+                if isinstance(payload,dict) and payload.get("_v11210_fallback"):
+                    d["momentum_fallback"]=int(d.get("momentum_fallback",0))+1
                 signal=_decorate(signal,row[4],row[5],idx,len(full_rows))
                 live.append(signal)
                 frames_for_corr[row[0]]=row[2]

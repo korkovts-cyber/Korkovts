@@ -1,10 +1,10 @@
-"""V11.20.6 · shared Binance data architecture · stability audited."""
+"""V11.21.1 · shared Binance data architecture · stability audited."""
 from __future__ import annotations
 import asyncio, copy, os, time
 import v1141_governor as governor
 import v11196_api_resilience as api_resilience
 
-REQUESTS_PER_SEC=max(4.0,min(9.0,float(os.getenv("V11200_RESEARCH_RPS","7.0"))))
+REQUESTS_PER_SEC=max(3.5,min(6.0,float(os.getenv("V11200_RESEARCH_RPS","4.5"))))
 MIN_START_GAP=1.0/REQUESTS_PER_SEC
 SPOT_DERIVATIVE_SNAPSHOT_TTL=max(60,min(240,int(os.getenv("V11200_SPOT_DERIV_TTL_SEC","150"))))
 _previous_governed_get=governor.governed_get
@@ -22,7 +22,7 @@ def _key(path,params):
 
 def _critical(path,params=None):
     path=str(path or ""); params=dict(params or {})
-    if path.endswith("/time") or path.endswith("/exchangeInfo") or path.endswith("/ticker/24hr"):
+    if path.endswith("/time") or path.endswith("/exchangeInfo"):
         return True
     return path.endswith("/klines") and str(params.get("symbol") or "").upper()=="BTCUSDT" and str(params.get("interval") or "")=="1m"
 
@@ -44,6 +44,7 @@ def _ttl(path,params=None):
     # plus Spot WATCH crowding checks. Five-minute reuse removes redundant
     # exchangeInfo traffic without making price/execution data stale.
     if path.endswith("/exchangeInfo"): return 300.0
+    if path.endswith("/ticker/24hr"): return 8.0
     if path.endswith("/premiumIndex"): return 12.0
     if path.endswith("/openInterest"): return 12.0
     if "openInterestHist" in path: return 45.0

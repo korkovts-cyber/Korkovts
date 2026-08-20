@@ -1,4 +1,4 @@
-"""Korkovts Signal AI V11.20.6 · CODE-QUALITY AUDITED SIGNAL ENGINE."""
+"""Korkovts Signal AI V11.21.1 · CODE-QUALITY AUDITED SIGNAL ENGINE."""
 from __future__ import annotations
 import asyncio
 import re
@@ -51,12 +51,15 @@ import bot_v11180 as base
 from v11200_data_architecture import install_after_base as install_v11200_after_base
 install_v11200_after_base()
 
-APP_VERSION="11.20.6"
+from v11210_signal_engine import install as install_v11210_signal_engine
+install_v11210_signal_engine(base)
+
+APP_VERSION="11.21.1"
 base.APP_VERSION=APP_VERSION
 base.config.APP_VERSION=APP_VERSION
 base.core.APP_VERSION=APP_VERSION
 
-# V11.20.6 concurrency contract.
+# V11.21.1 concurrency contract.
 _v11205_research_gate=asyncio.Lock()
 
 @asynccontextmanager
@@ -102,7 +105,7 @@ base.health_check=_v11196_health.check
 base.health_text=_v11196_health.text
 
 
-# V11.20.6 HEALTH FIX
+# V11.21.1 HEALTH FIX
 # The inherited callback detached HEALTH into a background UI task. If that task
 # failed or timed out, Telegram showed no new card and the user only saw stale
 # PAUSE. Intercept HEALTH directly: ACK immediately, bounded forced refresh,
@@ -131,17 +134,17 @@ async def _callback_v11203(update,context):
             reply_markup=base.main_menu(),
         )
     except Exception as exc:
-        base.core.log.exception("V11.20.6 HEALTH refresh failed")
+        base.core.log.exception("V11.21.1 HEALTH refresh failed")
         try:
             await query.message.reply_text(
-                "⚠️ <b>HEALTH CHECK FAILED · V11.20.6</b>\\n"
+                "⚠️ <b>HEALTH CHECK FAILED · V11.21.1</b>\\n"
                 f"Причина: <code>{type(exc).__name__}: {str(exc)[:240]}</code>\\n"
                 "Старый PAUSE не считается новым результатом этой проверки.",
                 parse_mode=base.ParseMode.HTML,
                 reply_markup=base.main_menu(),
             )
         except Exception:
-            base.core.log.exception("V11.20.6 HEALTH error reply failed")
+            base.core.log.exception("V11.21.1 HEALTH error reply failed")
     return None
 
 base.core.callback=_callback_v11203
@@ -172,7 +175,10 @@ async def _delivery_spot_crowding(symbol):
 base.spot_assess_news=_delivery_spot_news
 base.spot_fresh_derivatives_risk=_delivery_spot_crowding
 
-# 7) V11.20.6 scan-lock scheduler parity.
+def _v11207_blocked_diag(reason):
+    return {"status":"blocked","reason":str(reason or ""),"liquid":0,"prefiltered":0,"deep_checked":0,"final":0,"production_pool":0,"production_rejects":0,"scan_started":False}
+
+# 7) V11.21.1 scan-lock scheduler parity.
 # A legitimate full-universe scan may take close to its bounded ~3-minute
 # budget. The previous 90s wait was incompatible with that design.
 async def _run_automatic_scan_v11194(context,scanner_fn,label):
@@ -192,10 +198,10 @@ async def _run_automatic_scan_v11194(context,scanner_fn,label):
             if heartbeat:
                 reason=", ".join(getattr(health,"reasons",()) or ()) or "PRODUCTION HEALTH PAUSE"
                 await base._send_auto_heartbeat(
-                    context.bot,chats,base.scanner.scan_status().get("main",{}),
+                    context.bot,chats,_v11207_blocked_diag(reason),
                     scan_error=f"PRODUCTION HEALTH PAUSE: {reason}",
                 )
-            base.core.log.warning("V11.20.6 automatic %s skipped before scan: health PAUSE",label)
+            base.core.log.warning("V11.21.1 automatic %s skipped before scan: health PAUSE",label)
             return
 
         from v11191_futures_engine import FULL_SCAN_BUDGET_SEC
@@ -236,7 +242,7 @@ async def _run_automatic_scan_v11194(context,scanner_fn,label):
                     triggered+=1
 
         base.core.log.info(
-            "V11.20.6 automatic %s setups=%s armed=%s cancelled=%s "
+            "V11.21.1 automatic %s setups=%s armed=%s cancelled=%s "
             "entry_now=%s",
             label,len(fresh),armed,cancelled,triggered,
         )
@@ -246,7 +252,7 @@ async def _run_automatic_scan_v11194(context,scanner_fn,label):
                 fresh_setups=len(fresh),triggered=triggered,
             )
     except Exception as exc:
-        base.core.log.exception("V11.20.6 automatic %s scan failed",label)
+        base.core.log.exception("V11.21.1 automatic %s scan failed",label)
         if heartbeat and chats:
             await base._send_auto_heartbeat(
                 context.bot,chats,base.scanner.scan_status().get("main",{}),
@@ -256,7 +262,7 @@ async def _run_automatic_scan_v11194(context,scanner_fn,label):
 base.core._run_automatic_scan=_run_automatic_scan_v11194
 
 
-# V11.20.6 truthful AUTO heartbeat.
+# V11.21.1 truthful AUTO heartbeat.
 # A 0→0→0→0 funnel is not a market result when Health/lock prevented startup.
 _original_heartbeat_text_v11206=base.heartbeat_text
 
@@ -270,7 +276,8 @@ def _heartbeat_text_v11206(diagnostics,**kwargs):
         int(d.get("deep_checked",0) or 0),
         int(d.get("final",0) or 0),
     )
-    if scan_error and counts==(0,0,0,0):
+    scan_started=bool(d.get("scan_started",True))
+    if scan_error and (counts==(0,0,0,0) or not scan_started):
         text=re.sub(
             r"🔎 Рынок: <b>0</b> ликвидных → <b>0</b> кандидатов → <b>0</b> deep-check → <b>0</b> финальных",
             "🔎 Рынок: <b>СКАН НЕ ЗАПУЩЕН / НЕТ ПОЛНОГО ПРОХОДА</b>",
@@ -281,7 +288,7 @@ def _heartbeat_text_v11206(diagnostics,**kwargs):
 
 base.heartbeat_text=_heartbeat_text_v11206
 
-# 8) V11.20.6 truthful scan diagnostics.
+# 8) V11.21.1 truthful scan diagnostics.
 # Legacy manual handlers collapsed every exception into "mandatory source unavailable".
 # Keep safety fail-closed, but surface the actual stage/reason to Telegram.
 
@@ -336,7 +343,7 @@ async def _prime_scan_cmd_v11199(update,context):
     try:
         await msg.reply_text(
             "🔎 Ищу сильные Futures-сетапы.\n"
-            "Найденные кандидаты сначала перейдут в ARMED; вход будет отдельным 🚨 ENTRY NOW.",
+            "Кандидаты проходят ARMED-мониторинг; при подтверждении бот пришлёт 🚨 LONG NOW / SHORT NOW с входом, стопом и целями.",
             reply_markup=base.main_menu()
         )
         from v11191_futures_engine import FULL_SCAN_BUDGET_SEC
@@ -353,7 +360,7 @@ async def _prime_scan_cmd_v11199(update,context):
             diagnostics=base.core.scan_status().get("main")
         )
     except Exception as exc:
-        base.core.log.exception("V11.20.6 manual market scan failed")
+        base.core.log.exception("V11.21.1 manual market scan failed")
         text=_v11199_scan_error_text(
             exc,base.core.scan_status().get("main"),"Futures"
         )
@@ -368,13 +375,13 @@ base.core.scan_cmd=_prime_scan_cmd_v11199
 
 
 
-# V11.20.6 truthful manual Spot diagnostics.
+# V11.21.1 truthful manual Spot diagnostics.
 if hasattr(base,"spot_cmd"):
     async def _spot_cmd_v11202(update,context):
         msg=update.effective_message
         await msg.reply_text(
             "🟢 Анализирую Binance Spot: полный рынок + deep execution/flow. "
-            "Сильный WATCH не является покупкой до live-подтверждения.",
+            "Сильный кандидат проходит WATCH → BUY READY → 🟢 BUY NOW при подтверждённой зоне и потоке.",
             reply_markup=base.main_menu(),
         )
         try:
@@ -383,7 +390,7 @@ if hasattr(base,"spot_cmd"):
                 context.bot,update.effective_chat.id,results,automatic=False
             )
         except Exception as exc:
-            base.core.log.exception("V11.20.6 Spot manual scan failed")
+            base.core.log.exception("V11.21.1 Spot manual scan failed")
             d=dict(base.spot_scan_status() or {})
             reason=str(d.get("reason") or f"{type(exc).__name__}: {exc}")
             await msg.reply_text(
@@ -412,7 +419,7 @@ if hasattr(base,"short_scan_cmd_v1142"):
                 diagnostics=base.core.scan_status().get("short")
             )
         except Exception as exc:
-            base.core.log.exception("V11.20.6 manual short scan failed")
+            base.core.log.exception("V11.21.1 manual short scan failed")
             text=_v11199_scan_error_text(
                 exc,base.core.scan_status().get("short"),"FAST Futures"
             )

@@ -9,13 +9,16 @@ for p in files:
     ast.parse(Path(p).read_text(encoding="utf-8"),filename=p)
 
 f=Path("v11191_futures_engine.py").read_text()
+futures=f
 s=Path("v11191_spot_engine.py").read_text()
+spot=s
 i=Path("v11191_integrity.py").read_text()
 b=Path("bot_v11191.py").read_text()
 api=Path("v11196_api_resilience.py").read_text()
 sources=Path("v11197_sources.py").read_text()
 screen=Path("v11198_deep_screen.py").read_text()
 data_arch=Path("v11200_data_architecture.py").read_text()
+signal_engine=Path("v11210_signal_engine.py").read_text()
 
 checks={
  "Futures entire liquid universe ranked":"full_universe_ranked" in f,
@@ -50,7 +53,7 @@ checks={
  "Mandatory source split":"mandatory_sources" in sources and "exchangeInfo timeout" in sources and "ticker/24hr timeout" in sources,
  "exchangeInfo verified cache":"EXCHANGEINFO_CACHE_MAX_SEC" in sources and '"source":"CACHE"' in sources,
  "ticker short cache":"TICKER_CACHE_MAX_SEC" in sources and "75" in sources,
- "Mandatory source priority":'path.endswith("/exchangeInfo")' in api and 'path.endswith("/ticker/24hr")' in api,
+ "Mandatory source priority":'path.endswith("/time")' in api and "_estimated_weight" in api,
  "Source diagnostics":"source_meta" in f and "mandatory_sources" in f and "source_error" in f,
  "Two-stage deep engine":"quick_deep_screen" in f and "select_full_deep" in f,
  "All 36 fast screened":"deep_screen_complete" in f and "deep_screen_coverage" in f,
@@ -65,7 +68,7 @@ checks={
  "REST single-flight":"_inflight" in data_arch and "singleflight_hits" in data_arch,
  "Telemetry TTL cache":"def _ttl" in data_arch and "cache_hits" in data_arch,
  "Spot watch snapshot reuse":"SPOT_DERIVATIVE_SNAPSHOT_TTL" in data_arch and "_install_spot_snapshot_reuse" in data_arch,
- "Lower API headroom ceiling":"V11200_SOFT_WEIGHT_CEILING" in api and '"1500"' in api,
+ "Lower API headroom ceiling":"V11200_SOFT_WEIGHT_CEILING" in api and '"1150"' in api,
  "Architecture installed before inherited base":"install_v11200_data_architecture()" in b and b.index("install_v11200_data_architecture()") < b.index("import bot_v11180 as base"),
  "Singleflight cancellation safe":"asyncio.shield(future)" in data_arch and "except asyncio.CancelledError" in data_arch,
  "Realtime execution priority":"def _realtime" in data_arch and 'path.endswith("/bookTicker")' in data_arch and 'path.endswith("/depth")' not in data_arch[data_arch.index("def _realtime"):data_arch.index("def _ttl")] and 'path.endswith("/aggTrades")' not in data_arch[data_arch.index("def _realtime"):data_arch.index("def _ttl")],
@@ -77,8 +80,8 @@ checks={
  "Health recheck inside scan lock":b.count("health=await base.health_check(force=True)")>=3,
  "Direct bounded HEALTH callback":"_callback_v11203" in b and 'data!="v112:health"' in b and "timeout=15" in b,
  "HEALTH updates runtime snapshot":"base._last_health=health" in b,
- "HEALTH always reports failure":"HEALTH CHECK FAILED · V11.20.6" in b,
- "HEALTH card timestamp":"PRODUCTION HEALTH · V11.20.6" in api and "Проверено:" in api,
+ "HEALTH always reports failure":"HEALTH CHECK FAILED · V11.21.1" in b,
+ "HEALTH card timestamp":"PRODUCTION HEALTH · V11.21.1" in api and "Проверено:" in api,
  "PRIME actual callback binding":"base.core.scan_cmd=_prime_scan_cmd_v11199" in b,
  "FAST actual callback binding":"base.core.short_scan_cmd=_short_scan_cmd_v11199" in b,
  "FAST shared lock":"async def _short_scan_cmd_v11199" in b and "async with _v11205_full_scan_guard" in b[b.index("async def _short_scan_cmd_v11199"):],
@@ -90,10 +93,23 @@ checks={
  "Current error beats stale diagnostics":"priority_tokens" in b and "full-market research lock timeout" in b,
  "Zero funnel truth":"_heartbeat_text_v11206" in b and "СКАН НЕ ЗАПУЩЕН / НЕТ ПОЛНОГО ПРОХОДА" in b,
  "Runtime health synchronized":b.count("base._last_health=health")>=5,
- "Data architecture version synchronized":"V11.20.6" in data_arch,
+ "Data architecture version synchronized":"V11.21.1" in data_arch,
+ "429 telemetry before raise":"_telemetry_raw_get" in api and 'governor._raw_get=_telemetry_raw_get' in api,
+ "Weight-aware endpoint reservation":"_estimated_weight" in api and "_soft_weight_guard(path,params)" in api,
+ "Lower safe research pace":'V11200_RESEARCH_RPS","4.5"' in data_arch,
+ "Blocked cycle resets funnel":"_v11207_blocked_diag" in b and '"scan_started":False' in b,
+ "Signal rebalance installed":"install_v11210_signal_engine(base)" in b,
+ "Futures momentum continuation":"_momentum_fallback" in futures and "MOMENTUM CONTINUATION RETEST" in futures,
+ "Spot BUY READY lane":"spot_v11210" in spot and "BUY READY" in spot,
+ "Entry two-of-three live consensus":"2-of-3 micro consensus" in signal_engine,
+ "Hard evidence conflicts preserved":"audit.hard_conflicts" in signal_engine,
+ "V11.21.1 Futures cohort":"FUTURES_COHORT=\"11.21.1-signal-engine\"" in signal_engine and "entry_base.FUTURES_RELEASE_KEY=FUTURES_COHORT" in signal_engine,
+ "V11.21.1 Spot cohort":"SPOT_COHORT=\"11.21.1-spot-signal-engine\"" in signal_engine and "spot_watch.SPOT_RELEASE_KEY=SPOT_COHORT" in signal_engine,
+ "Strong annotation coherent":"v11211_state_coherent" in signal_engine and "base.annotate_strong_signals=strong_annotate_many" in signal_engine,
+ "Spot dedupe cohort aware":"COALESCE(s.release_version,'')=?" in signal_engine and "base.spot_was_sent_recently=spot_was_sent_recently_current" in signal_engine,
  "Truthful Spot manual diagnostics":"_spot_cmd_v11202" in b and "Spot scan не завершён" in b,
 }
 failed=[k for k,v in checks.items() if not v]
 if failed:
-    raise SystemExit("V11.20.6 RELEASE CHECK FAILED: "+", ".join(failed))
-print("V11.20.6 RELEASE CHECK: OK")
+    raise SystemExit("V11.21.1 RELEASE CHECK FAILED: "+", ".join(failed))
+print("V11.21.1 RELEASE CHECK: OK")

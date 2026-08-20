@@ -2,7 +2,7 @@ import ast
 import unittest
 from pathlib import Path
 
-class V112006Contracts(unittest.TestCase):
+class V112110Contracts(unittest.TestCase):
     def test_futures_full_universe_before_deep(self):
         s=Path("v11191_futures_engine.py").read_text()
         self.assertIn("full_universe_ranked",s)
@@ -208,8 +208,8 @@ class V112006Contracts(unittest.TestCase):
 
     def test_source_endpoints_have_critical_priority(self):
         s=Path("v11196_api_resilience.py").read_text()
-        self.assertIn('path.endswith("/exchangeInfo")',s)
-        self.assertIn('path.endswith("/ticker/24hr")',s)
+        self.assertIn('path.endswith("/time")',s)
+        self.assertIn('_estimated_weight',s)
 
     def test_futures_source_error_is_not_generic_timeout(self):
         s=Path("v11191_futures_engine.py").read_text()
@@ -295,7 +295,7 @@ class V112006Contracts(unittest.TestCase):
 
     def test_v11200_weight_headroom(self):
         s=Path("v11196_api_resilience.py").read_text()
-        self.assertIn("V11200_SOFT_WEIGHT_CEILING",s); self.assertIn('"1500"',s)
+        self.assertIn("V11200_SOFT_WEIGHT_CEILING",s); self.assertIn('"1150"',s)
 
     def test_v112001_follower_cancel_cannot_cancel_shared_future(self):
         s=Path("v11200_data_architecture.py").read_text()
@@ -375,12 +375,12 @@ class V112006Contracts(unittest.TestCase):
 
     def test_v112003_health_failure_is_visible(self):
         s=Path("bot_v11191.py").read_text()
-        self.assertIn("HEALTH CHECK FAILED · V11.20.6",s)
+        self.assertIn("HEALTH CHECK FAILED · V11.21.1",s)
         self.assertIn("Старый PAUSE не считается новым результатом",s)
 
     def test_v112003_health_card_has_version_and_timestamp(self):
         s=Path("v11196_api_resilience.py").read_text()
-        self.assertIn("PRODUCTION HEALTH · V11.20.6",s)
+        self.assertIn("PRODUCTION HEALTH · V11.21.1",s)
         self.assertIn("Проверено:",s)
         self.assertIn("datetime.now(timezone.utc)",s)
 
@@ -446,8 +446,75 @@ class V112006Contracts(unittest.TestCase):
 
     def test_v112006_data_architecture_version_is_current(self):
         s=Path("v11200_data_architecture.py").read_text()
-        self.assertIn("V11.20.6",s)
+        self.assertIn("V11.21.1",s)
         self.assertNotIn("V11.20.2",s)
+
+    def test_v112007_reads_weight_header_even_on_429(self):
+        s=Path("v11196_api_resilience.py").read_text(); block=s[s.index("async def _telemetry_raw_get"):s.index("def _fmt_metric")]
+        self.assertLess(block.index("x-mbx-used-weight-1m"),block.index("if response.status_code in (418,429)"))
+
+    def test_v112007_reserves_heavy_endpoint_weight(self):
+        s=Path("v11196_api_resilience.py").read_text(); self.assertIn("used + reserve < SOFT_WEIGHT_CEILING",s); self.assertIn('return 1 if p.get("symbol") else 40',s)
+
+    def test_v112007_ticker_is_paced_and_cached(self):
+        s=Path("v11200_data_architecture.py").read_text(); critical=s[s.index("def _critical"):s.index("def _realtime")]
+        self.assertNotIn('path.endswith("/ticker/24hr")',critical); self.assertIn('if path.endswith("/ticker/24hr"): return 8.0',s)
+
+    def test_v112007_blocked_auto_clears_stale_funnel(self):
+        s=Path("bot_v11191.py").read_text(); self.assertIn("_v11207_blocked_diag",s); self.assertIn('"scan_started":False',s)
+
+    def test_v112100_signal_rebalance_installed_after_base(self):
+        s=Path("bot_v11191.py").read_text()
+        self.assertIn("install_v11210_signal_engine(base)",s)
+        self.assertGreater(s.index("install_v11210_signal_engine(base)"),s.index("import bot_v11180 as base"))
+
+    def test_v112100_futures_momentum_lane_preserves_hard_risk(self):
+        s=Path("v11191_futures_engine.py").read_text()
+        self.assertIn("_momentum_fallback",s)
+        self.assertIn("MOMENTUM CONTINUATION RETEST",s)
+        self.assertIn("spread<=5.0",s)
+        self.assertIn('adl in ("low","medium")',s)
+
+    def test_v112100_entry_uses_live_two_of_three_not_closed_context(self):
+        s=Path("v11210_signal_engine.py").read_text()
+        self.assertIn("live_flow and non_opposing and checks>=2",s)
+        self.assertIn('if state=="CANCEL" and "move escaped entry by >0.25R" in reason',s)
+        self.assertIn("dist<=0.50",s)
+
+    def test_v112100_hard_evidence_conflicts_cannot_be_relaxed(self):
+        s=Path("v11210_signal_engine.py").read_text()
+        self.assertIn("if audit.eligible or audit.hard_conflicts",s)
+        self.assertIn("not audit.hard_conflicts",s)
+
+    def test_v112100_spot_buy_ready_needs_zone_and_execution(self):
+        s=Path("v11191_spot_engine.py").read_text()
+        self.assertIn("spot_v11210",s)
+        self.assertIn("trend4 and in_zone",s)
+        self.assertIn('spread_bps"),999)<=6.0',s)
+
+    def test_v112110_new_decision_engine_has_fresh_futures_cohort(self):
+        s=Path("v11210_signal_engine.py").read_text()
+        self.assertIn('FUTURES_COHORT="11.21.1-signal-engine"',s)
+        self.assertIn("entry_base.FUTURES_RELEASE_KEY=FUTURES_COHORT",s)
+        self.assertIn("base.db.STRATEGY_VERSION=FUTURES_COHORT",s)
+
+    def test_v112110_spot_watch_and_signal_cohorts_are_synchronized(self):
+        s=Path("v11210_signal_engine.py").read_text()
+        self.assertIn('SPOT_COHORT="11.21.1-spot-signal-engine"',s)
+        self.assertIn("spot_db.SPOT_RELEASE_VERSION=SPOT_COHORT",s)
+        self.assertIn("spot_watch.SPOT_RELEASE_KEY=SPOT_COHORT",s)
+
+    def test_v112110_strong_annotation_matches_decision_assessment(self):
+        s=Path("v11210_signal_engine.py").read_text()
+        self.assertIn("def strong_annotate(signal):",s)
+        self.assertIn("a=strong_assess(signal)",s)
+        self.assertIn("v11211_state_coherent",s)
+        self.assertIn("base.annotate_strong_signals=strong_annotate_many",s)
+
+    def test_v112110_spot_dedupe_is_release_scoped(self):
+        s=Path("v11210_signal_engine.py").read_text()
+        self.assertIn("COALESCE(s.release_version,'')=?",s)
+        self.assertIn("base.spot_was_sent_recently=spot_was_sent_recently_current",s)
 
 if __name__=="__main__":
     unittest.main()
