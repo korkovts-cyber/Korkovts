@@ -2,7 +2,7 @@ import ast
 import unittest
 from pathlib import Path
 
-class V112002Contracts(unittest.TestCase):
+class V112006Contracts(unittest.TestCase):
     def test_futures_full_universe_before_deep(self):
         s=Path("v11191_futures_engine.py").read_text()
         self.assertIn("full_universe_ranked",s)
@@ -323,8 +323,8 @@ class V112002Contracts(unittest.TestCase):
 
     def test_v112002_manual_prime_uses_shared_scan_lock(self):
         s=Path("bot_v11191.py").read_text()
-        self.assertIn("another full-market scan still active",s)
-        self.assertIn("async with base.core._scan_lock",s)
+        self.assertIn("_v11205_full_scan_guard",s)
+        self.assertIn("full-market research lock timeout",s)
 
     def test_v112002_spot_full_scan_is_serialized_with_futures(self):
         s=Path("bot_v11191.py").read_text()
@@ -350,7 +350,8 @@ class V112002Contracts(unittest.TestCase):
 
     def test_v112002_health_is_rechecked_after_waiting_for_lock(self):
         s=Path("bot_v11191.py").read_text()
-        block=s[s.index("async with base.core._scan_lock:",s.index("async def _run_automatic_scan")):]
+        start=s.index("async def _run_automatic_scan")
+        block=s[s.index("async with _v11205_full_scan_guard",start):]
         self.assertIn("health=await base.health_check(force=True)",block[:1500])
 
     def test_v112002_spot_manual_reports_actual_reason(self):
@@ -358,6 +359,95 @@ class V112002Contracts(unittest.TestCase):
         self.assertIn("_spot_cmd_v11202",s)
         self.assertIn('reason=str(d.get("reason")',s)
         self.assertIn("base.spot_cmd=_spot_cmd_v11202",s)
+
+    def test_v112003_health_callback_is_not_detached(self):
+        s=Path("bot_v11191.py").read_text()
+        self.assertIn("_callback_v11203",s)
+        self.assertIn('data!="v112:health"',s)
+        block=s[s.index("async def _callback_v11203"):s.index("base.core.callback=_callback_v11203")+80]
+        self.assertNotIn("_spawn_ui_task",block)
+        self.assertIn("wait_for",block)
+        self.assertIn("timeout=15",block)
+
+    def test_v112003_health_refresh_updates_last_health(self):
+        s=Path("bot_v11191.py").read_text()
+        self.assertIn("base._last_health=health",s)
+
+    def test_v112003_health_failure_is_visible(self):
+        s=Path("bot_v11191.py").read_text()
+        self.assertIn("HEALTH CHECK FAILED · V11.20.6",s)
+        self.assertIn("Старый PAUSE не считается новым результатом",s)
+
+    def test_v112003_health_card_has_version_and_timestamp(self):
+        s=Path("v11196_api_resilience.py").read_text()
+        self.assertIn("PRODUCTION HEALTH · V11.20.6",s)
+        self.assertIn("Проверено:",s)
+        self.assertIn("datetime.now(timezone.utc)",s)
+
+    def test_v112004_prime_routes_through_app_bot_global(self):
+        s=Path("bot_v11191.py").read_text()
+        self.assertIn("base.core.scan_cmd=_prime_scan_cmd_v11199",s)
+        self.assertLess(s.index("async def _prime_scan_cmd_v11199"),s.index("base.core.scan_cmd=_prime_scan_cmd_v11199"))
+
+    def test_v112004_fast_routes_through_app_bot_global(self):
+        s=Path("bot_v11191.py").read_text()
+        self.assertIn("base.core.short_scan_cmd=_short_scan_cmd_v11199",s)
+        self.assertLess(s.index("async def _short_scan_cmd_v11199"),s.index("base.core.short_scan_cmd=_short_scan_cmd_v11199"))
+
+    def test_v112004_fast_has_shared_lock_and_health_preflight(self):
+        s=Path("bot_v11191.py").read_text()
+        block=s[s.index("async def _short_scan_cmd_v11199"):s.index("# Serialize scheduled Fast Radar")]
+        self.assertIn("async with _v11205_full_scan_guard",block)
+        self.assertIn("base.health_check(force=True)",block)
+        self.assertIn("PRODUCTION HEALTH PAUSE",block)
+
+    def test_v112004_button_routes_fail_fast_if_overwritten(self):
+        s=Path("bot_v11191.py").read_text()
+        self.assertIn("PRIME FUTURES routing invariant failed",s)
+        self.assertIn("FAST FUTURES routing invariant failed",s)
+
+    def test_v112005_full_scan_lock_is_really_bounded(self):
+        s=Path("bot_v11191.py").read_text()
+        self.assertIn("_v11205_full_scan_guard",s)
+        self.assertIn("asyncio.wait_for(base.core._scan_lock.acquire()",s)
+        self.assertNotIn("while base.core._scan_lock.locked() and waited<wait_limit",s)
+
+    def test_v112005_fast_radar_cannot_overlap_full_research(self):
+        s=Path("bot_v11191.py").read_text()
+        self.assertIn("_v11205_research_gate",s)
+        self.assertIn("_fast_radar_job_v11205",s)
+        self.assertIn("base.fast_radar_job=_fast_radar_job_v11205",s)
+
+    def test_v112005_fast_ui_keeps_short_mode(self):
+        s=Path("bot_v11191.py").read_text()
+        block=s[s.index("async def _short_scan_cmd_v11199"):s.index("# Serialize scheduled Fast Radar")]
+        self.assertIn("short=True",block)
+
+    def test_v112005_health_and_spot_bindings_fail_fast(self):
+        s=Path("bot_v11191.py").read_text()
+        self.assertIn("HEALTH callback routing invariant failed",s)
+        self.assertIn("SPOT full-scan routing invariant failed",s)
+
+    def test_v112006_current_pause_reason_beats_stale_diagnostics(self):
+        s=Path("bot_v11191.py").read_text()
+        self.assertIn("priority_tokens",s)
+        self.assertIn("PRODUCTION HEALTH PAUSE",s)
+        self.assertIn("full-market research lock timeout",s)
+
+    def test_v112006_zero_funnel_is_not_market_result(self):
+        s=Path("bot_v11191.py").read_text()
+        self.assertIn("_heartbeat_text_v11206",s)
+        self.assertIn("СКАН НЕ ЗАПУЩЕН / НЕТ ПОЛНОГО ПРОХОДА",s)
+        self.assertIn("counts==(0,0,0,0)",s)
+
+    def test_v112006_health_snapshot_is_synchronized(self):
+        s=Path("bot_v11191.py").read_text()
+        self.assertGreaterEqual(s.count("base._last_health=health"),5)
+
+    def test_v112006_data_architecture_version_is_current(self):
+        s=Path("v11200_data_architecture.py").read_text()
+        self.assertIn("V11.20.6",s)
+        self.assertNotIn("V11.20.2",s)
 
 if __name__=="__main__":
     unittest.main()

@@ -70,14 +70,30 @@ checks={
  "Singleflight cancellation safe":"asyncio.shield(future)" in data_arch and "except asyncio.CancelledError" in data_arch,
  "Realtime execution priority":"def _realtime" in data_arch and 'path.endswith("/bookTicker")' in data_arch and 'path.endswith("/depth")' not in data_arch[data_arch.index("def _realtime"):data_arch.index("def _ttl")] and 'path.endswith("/aggTrades")' not in data_arch[data_arch.index("def _realtime"):data_arch.index("def _ttl")],
  "AUTO health preflight":"health=await base.health_check(force=True)" in b and "skipped before scan: health PAUSE" in b,
- "Manual PRIME serialized":"async with base.core._scan_lock" in b and "another full-market scan still active" in b,
+ "Manual PRIME serialized":"async with _v11205_full_scan_guard" in b and "full-market research lock timeout" in b,
  "Spot/Futures heavy scan serialization":"_serialized_spot_scan_v11202" in b and b.rindex("base.spot_scan=_serialized_spot_scan_v11202") > b.rindex("base.spot_scan=v11191_spot_engine.scan"),
  "Two-stage diagnostic truth":"deep_screen_candidates" in f and 'd["deep_checked"]=len(full_rows)' in f,
  "exchangeInfo shared TTL":'path.endswith("/exchangeInfo"): return 300.0' in data_arch,
  "Health recheck inside scan lock":b.count("health=await base.health_check(force=True)")>=3,
+ "Direct bounded HEALTH callback":"_callback_v11203" in b and 'data!="v112:health"' in b and "timeout=15" in b,
+ "HEALTH updates runtime snapshot":"base._last_health=health" in b,
+ "HEALTH always reports failure":"HEALTH CHECK FAILED · V11.20.6" in b,
+ "HEALTH card timestamp":"PRODUCTION HEALTH · V11.20.6" in api and "Проверено:" in api,
+ "PRIME actual callback binding":"base.core.scan_cmd=_prime_scan_cmd_v11199" in b,
+ "FAST actual callback binding":"base.core.short_scan_cmd=_short_scan_cmd_v11199" in b,
+ "FAST shared lock":"async def _short_scan_cmd_v11199" in b and "async with _v11205_full_scan_guard" in b[b.index("async def _short_scan_cmd_v11199"):],
+ "Button routing invariants":"PRIME FUTURES routing invariant failed" in b and "FAST FUTURES routing invariant failed" in b,
+ "Bounded full scan guard":"_v11205_full_scan_guard" in b and "asyncio.wait_for(base.core._scan_lock.acquire()" in b,
+ "Research gate":"_v11205_research_gate" in b and "_fast_radar_job_v11205" in b,
+ "FAST renderer uses short mode":"results,short=True" in b,
+ "Health and Spot routing invariants":"HEALTH callback routing invariant failed" in b and "SPOT full-scan routing invariant failed" in b,
+ "Current error beats stale diagnostics":"priority_tokens" in b and "full-market research lock timeout" in b,
+ "Zero funnel truth":"_heartbeat_text_v11206" in b and "СКАН НЕ ЗАПУЩЕН / НЕТ ПОЛНОГО ПРОХОДА" in b,
+ "Runtime health synchronized":b.count("base._last_health=health")>=5,
+ "Data architecture version synchronized":"V11.20.6" in data_arch,
  "Truthful Spot manual diagnostics":"_spot_cmd_v11202" in b and "Spot scan не завершён" in b,
 }
 failed=[k for k,v in checks.items() if not v]
 if failed:
-    raise SystemExit("V11.20.2 RELEASE CHECK FAILED: "+", ".join(failed))
-print("V11.20.2 RELEASE CHECK: OK")
+    raise SystemExit("V11.20.6 RELEASE CHECK FAILED: "+", ".join(failed))
+print("V11.20.6 RELEASE CHECK: OK")

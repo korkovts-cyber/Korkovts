@@ -1,4 +1,4 @@
-"""V11.20.2 · Binance API resilience overlay.
+"""V11.20.6 · Binance API resilience overlay.
 
 Prevents full-universe research traffic from starving production health probes,
 adds proactive request-weight headroom, and makes health diagnostics distinguish
@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from datetime import datetime, timezone
 
 import v1141_governor as governor
 import v112_health as health
@@ -154,8 +155,10 @@ def text(h):
     lat="N/A" if h.rest_latency_ms<0 else f"{h.rest_latency_ms:.0f} ms"
     candle="N/A" if h.candle_age_sec<0 else f"{h.candle_age_sec:.0f} sec"
     skew="N/A" if h.server_clock_skew_ms<0 else f"{h.server_clock_skew_ms/1000:+.1f} sec"
+    checked=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     return (
-        "📡 <b>PRODUCTION HEALTH</b>\n━━━━━━━━━━━━━━━━━━\n"
+        "📡 <b>PRODUCTION HEALTH · V11.20.6</b>\n━━━━━━━━━━━━━━━━━━\n"
+        f"Проверено: <b>{checked}</b>\n"
         f"{icon} Статус: <b>{h.status}</b>\n"
         f"REST latency: <b>{lat}</b>\n"
         f"BTC 1m freshness: <b>{candle}</b>\n"

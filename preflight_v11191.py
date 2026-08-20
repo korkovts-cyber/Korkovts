@@ -8,7 +8,7 @@ required=[
 ]
 missing=[p for p in required if not Path(p).is_file()]
 if missing:
-    raise SystemExit("V11.20.2 PREFLIGHT FAILED missing: "+", ".join(missing))
+    raise SystemExit("V11.20.6 PREFLIGHT FAILED missing: "+", ".join(missing))
 
 for p in required:
     if p.endswith(".py"):
@@ -16,7 +16,7 @@ for p in required:
 
 railway=Path("railway.toml").read_text(encoding="utf-8")
 if "python bot_v11191.py" not in railway:
-    raise SystemExit("V11.20.2 PREFLIGHT FAILED railway entrypoint")
+    raise SystemExit("V11.20.6 PREFLIGHT FAILED railway entrypoint")
 
 fut=Path("v11191_futures_engine.py").read_text()
 spot=Path("v11191_spot_engine.py").read_text()
@@ -30,5 +30,5 @@ contracts=[
 ]
 bad=[name for name,ok in contracts if not ok]
 if bad:
-    raise SystemExit("V11.20.2 PREFLIGHT FAILED contracts: "+", ".join(bad))
-print("V11.20.2 FULL-UNIVERSE PREFLIGHT: OK")
+    raise SystemExit("V11.20.6 PREFLIGHT FAILED contracts: "+", ".join(bad))
+print("V11.20.6 FULL-UNIVERSE PREFLIGHT: OK")

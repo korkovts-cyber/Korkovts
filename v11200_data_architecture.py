@@ -1,4 +1,4 @@
-"""V11.20.2 · shared Binance data architecture · stability audited."""
+"""V11.20.6 · shared Binance data architecture · stability audited."""
 from __future__ import annotations
 import asyncio, copy, os, time
 import v1141_governor as governor

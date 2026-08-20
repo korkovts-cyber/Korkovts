@@ -1,0 +1,146 @@
+KORKOVTS SIGNAL AI V11.20.6 · FULL-UNIVERSE SIGNAL ENGINE
+
+Why this release exists
+The previous production funnel could reduce 145-170 liquid Futures symbols to 1-2
+before derivatives analysis, and Spot could blanket-veto BUYs because slow 1D regime,
+auxiliary news/crowding degradation or a second-stage 4H gate.
+
+FUTURES
+- Every liquid Binance USDT-M perpetual receives 15m/1H/4H discovery and independent LONG/SHORT rank.
+- Heavy derivatives analysis uses a balanced 36-symbol shortlist (top LONG + top SHORT), not only technical survivors.
+- V11.18 Strong/Indicator/Adaptive/Portfolio/Final-Risk/ENTRY-NOW remains authoritative.
+- Real bad taker/order-flow, execution, extreme crowding, negative events and invalid geometry still block.
+- Binance clock guard now uses 3 samples + lowest RTT and recent-good fallback for transient /time failures.
+
+SPOT
+- Every liquid Binance Spot/USDT symbol receives daily/cross-sectional ranking.
+- Deep pool widened to 36 symbols.
+- Removed the pre-L2 second-stage 4H kill switch.
+- Slow BEAR regime can no longer blanket-block an independently strong recovery leader.
+- Missing auxiliary Futures crowding/news telemetry is uncertainty/penalty, not directional proof.
+- Actual negative news, extreme crowding, poor execution, weak flow, bad price location and evidence conflict remain vetoes.
+- Existing Spot watchtower/delivery/risk logic remains in the V11.18 runtime.
+
+IMPORTANT
+This release is designed to stop false 'no signal' caused by architecture.
+It does NOT guarantee profitable trades and does not fabricate an entry just to satisfy a quota.
+
+CODE QUALITY AUDIT
+- Removed stale direct production-function imports.
+- Adaptive deep shortlist avoids artificial 50/50 LONG/SHORT allocation.
+- Final Spot delivery now matches discovery policy for telemetry-only degradation.
+- Added behavioral shortlist and delivery-parity regression contracts.
+
+SCAN-LOCK FIX
+- The 175s scan target is now an actual deadline.
+- Frame batches are individually bounded and pending frame tasks are cancelled.
+- Deep derivatives tasks are cancelled at the overall deadline.
+- AUTO lock wait is aligned to the bounded full-scan budget instead of 90 seconds.
+- Running scans publish live progress; low coverage is reported as incomplete, not "0 signals".
+
+SIGNAL RECOVERY
+- Strong Futures geometry-only rejections become controlled pullback candidates.
+- Existing ENTRY NOW remains authoritative before delivery.
+- Spot news outage is degraded, not a whole-scan abort.
+- Real strategy audit is retained in diagnostics.
+
+API RESILIENCE
+- Full-universe research traffic is capped below critical health/ENTRY capacity.
+- Research waits proactively near Binance request-weight ceiling instead of driving into 429.
+- Health reports real rate-limit cooldown rather than fake 9999ms/+1000s sentinel metrics.
+- A short transient health-probe failure may reuse a very recent verified state as DEGRADED, never as fresh market evidence.
+- Futures frame/deep concurrency reduced slightly while preserving all-symbol ranking and the 36-name deep shortlist.
+
+SOURCE-STAGE RESILIENCE
+- exchangeInfo and ticker/24hr are no longer hidden inside one generic 30s gather.
+- Every mandatory source has its own timeout and exact Telegram diagnostic.
+- exchangeInfo may reuse a recently verified 6h cache; ticker/24hr may reuse only a
+  short 75s verified cache because it drives liquidity/ranking.
+- exchangeInfo and ticker/24hr are critical-priority governor requests.
+- Heavy analysis concurrency defaults to 6, leaving production headroom.
+- A real Binance cooldown is reported explicitly instead of generic TimeoutError.
+- A source-stage failure cannot masquerade as "0 liquid markets / no signals".
+
+TWO-STAGE DEEP ENGINE
+- All liquid USDT-M perpetuals still receive the full multi-timeframe market ranking.
+- The wide 36-name shortlist now receives a cheap derivatives screen using one bulk
+  premiumIndex request plus one OI request per symbol.
+- Only the best 14 screened candidates receive the expensive full 9-component
+  derivatives snapshot.
+- Full-deep direction allocation is adaptive with opposite-side reserve, not 50/50.
+- The fast screen cannot generate or deliver a signal; all final candidates still
+  pass the existing production strategy, Strong/Indicator/Adaptive/Final Risk and ENTRY NOW.
+- This removes the impossible 36 x full-snapshot workload from the ~3 minute scan budget.
+
+TRUTHFUL TELEGRAM DIAGNOSTICS
+- Manual PRIME FUTURES no longer maps every exception to "mandatory source unavailable".
+- Source timeout, rate-limit cooldown, fast-screen coverage and full-deep deadline failures
+  are reported with their real stage/reason.
+- FAST Futures receives the same truthful diagnostics.
+- Safety behavior remains fail-closed: diagnostics improve, trading gates do not weaken.
+
+V11.20.6 DATA ARCHITECTURE
+- Shared REST pacing: default 7 research requests/sec.
+- Single-flight deduplicates identical concurrent Binance calls.
+- Short TTL reuse is limited to derivatives telemetry; depth/candles/time are not cached here.
+- Proactive request-weight ceiling lowered from 1900 to 1500; analysis concurrency lowered to 5.
+- Spot Watchtower reuses a full Futures crowding snapshot for 150 seconds between adjacent checks.
+- Real 429/418 cooldown still produces PRODUCTION HEALTH PAUSE.
+- Trading thresholds and live BUY/ENTRY gates are unchanged.
+
+STABILITY AUDIT
+- Fixed cancellation safety in REST single-flight: a scan deadline can no longer
+  leave followers waiting on an unresolved Future.
+- Followers await the shared request through asyncio.shield(), so cancelling one
+  consumer cannot cancel data needed by other tasks.
+- Live /depth, /aggTrades and /bookTicker are realtime-priority and no longer wait
+  behind the bulk research pacing queue.
+- Realtime priority still passes through the underlying Binance governor,
+  global concurrency limit and real 429/418 cooldown.
+- Spot WATCH persistence remains SQLite-backed on DATABASE_PATH; restart/deploy
+  does not erase an active watchlist when /data is persistent.
+
+FINAL STABILITY AUDIT
+- AUTO performs Production Health preflight before a full 180-symbol Futures scan.
+  Hard PAUSE/cooldown skips the research cycle instead of feeding the cooldown loop.
+- Manual PRIME FUTURES now uses the same global full-scan lock as AUTO.
+- Heavy Spot full scans are serialized with heavy Futures full scans through core._scan_lock.
+- Fast Radar already observes that lock; ENTRY monitor remains independent.
+- Removed broad /depth and /aggTrades research bypass from realtime priority; these requests
+  stay under the request-weight guard. Only tiny bookTicker probes keep priority.
+- Futures funnel now reports 36 fast-screen candidates -> 14 full-deep, instead of calling
+  all 36 expensive deep checks.
+
+- exchangeInfo is shared-cached for 5 minutes across Futures source discovery and Spot WATCH.
+- Production Health is rechecked inside the acquired full-scan lock before REST-heavy work starts.
+- Manual SPOT · SWING reports the actual scanner reason instead of a generic source-outage message.
+
+HEALTH FIX
+- HEALTH callback is no longer detached into a background UI task.
+- Button ACK is immediate, then a bounded forced health refresh runs for max 15s.
+- A successful refresh updates runtime _last_health before rendering the card.
+- A failed refresh always sends an explicit HEALTH CHECK FAILED card when Telegram is reachable.
+- Every HEALTH card includes V11.20.6 and an exact UTC checked timestamp.
+- An old Telegram PAUSE card can no longer be mistaken for a fresh health result.
+
+BUTTON ROUTING FIX
+- PRIME FUTURES now rebinds app.bot.scan_cmd (base.core.scan_cmd), the function Telegram callback actually resolves.
+- FAST 15M now rebinds app.bot.short_scan_cmd (base.core.short_scan_cmd).
+- FAST manual scan now uses the same global scan-lock and forced Production Health preflight as PRIME.
+- Startup routing invariants abort startup if a later patch restores stale PRIME/FAST handlers.
+- V11.20.3 direct bounded HEALTH fix remains active.
+
+CONCURRENCY AUDIT
+- Replaced poll-then-lock acquisition with a true bounded asyncio.wait_for guard.
+- Added one research gate shared by PRIME, FAST manual, AUTO, Spot full scan and Fast Radar.
+- Fast Radar can no longer race-start alongside a heavy full-market scan.
+- ENTRY NOW, L2, lifecycle and delivery remain outside the research gate.
+- FAST renderer now passes short=True, preventing 15M results from appearing as MAIN.
+- HEALTH callback and serialized Spot binding now have startup invariants.
+
+RUNTIME DIAGNOSTICS AUDIT
+- AUTO no longer presents 0→0→0→0 as a completed market scan when Health/lock prevented startup.
+- A current Health/rate-limit/lock error now overrides stale diagnostics.reason from a prior cycle.
+- Forced Health preflights synchronize runtime _last_health for AUTO/PRIME/FAST.
+- Data Architecture version marker is synchronized to V11.20.6.
+- Trading thresholds and BUY/ENTRY confirmation rules are unchanged.
