@@ -1,4 +1,4 @@
-"""V11.21.5 · shared Binance data architecture · stability audited."""
+"""V11.21.6 · shared Binance data architecture · stability audited."""
 from __future__ import annotations
 import asyncio, copy, os, time
 import v1141_governor as governor
@@ -45,7 +45,7 @@ def _ttl(path,params=None):
     # plus Spot WATCH crowding checks. Five-minute reuse removes redundant
     # exchangeInfo traffic without making price/execution data stale.
     if path.endswith("/exchangeInfo"): return 300.0
-    if path.endswith("/ticker/24hr"): return 8.0
+    if path.endswith("/ticker/24hr"): return 75.0
     if path.endswith("/premiumIndex"): return 12.0
     if path.endswith("/openInterest"): return 12.0
     if "openInterestHist" in path: return 45.0

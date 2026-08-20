@@ -1,4 +1,4 @@
-"""V11.21.5 · Binance API resilience overlay.
+"""V11.21.6 · Binance API resilience overlay.
 
 Prevents full-universe research traffic from starving production health probes,
 adds proactive request-weight headroom, and makes health diagnostics distinguish
@@ -76,12 +76,27 @@ async def _telemetry_raw_get(path,params=None):
     client=governor.market._http_client(); base=str(getattr(governor.market,"BINANCE_BASE_URL",""))
     response=await client.get(f"{base}{path}",params=params)
     used=response.headers.get("x-mbx-used-weight-1m") or response.headers.get("X-MBX-USED-WEIGHT-1M")
+    used_value=None
     if used:
         try:
-            value=int(used); governor._state["last_used_weight_1m"]=value
-            _budget["minute"]=int(time.time()//60); _budget["last_used"]=value
-        except Exception: pass
+            used_value=int(used); governor._state["last_used_weight_1m"]=used_value
+            _budget["minute"]=int(time.time()//60); _budget["last_used"]=used_value
+        except Exception:
+            used_value=None
     if response.status_code in (418,429):
+        retry=str(response.headers.get("Retry-After","") or "")
+        safe_params={}
+        for key,value in dict(params or {}).items():
+            if str(key) in ("symbol","interval","limit","period"):
+                safe_params[str(key)]=str(value)
+        governor._state.update({
+            "last_rate_limit_path":str(path),
+            "last_rate_limit_params":safe_params,
+            "last_rate_limit_status":int(response.status_code),
+            "last_rate_limit_weight":int(used_value or 0),
+            "last_rate_limit_retry_after":retry,
+            "last_rate_limit_at":time.time(),
+        })
         raise httpx.HTTPStatusError("Binance rate limit",request=response.request,response=response)
     response.raise_for_status(); return response.json()
 
@@ -175,13 +190,24 @@ def text(h):
     gs=governor.status()
     used_weight=int(gs.get("last_used_weight_1m",0) or 0)
     cooldown=max(0.0,float(gs.get("cooldown_seconds",0) or 0))
+    rl_path=str(gs.get("last_rate_limit_path") or "")
+    rl_status=int(gs.get("last_rate_limit_status",0) or 0)
+    rl_weight=int(gs.get("last_rate_limit_weight",0) or 0)
+    rl_retry=str(gs.get("last_rate_limit_retry_after") or "")
+    rl_age=(time.time()-float(gs.get("last_rate_limit_at",0) or 0)) if gs.get("last_rate_limit_at") else None
+    rl_line=""
+    if rl_path and rl_age is not None and rl_age<=1800:
+        rl_line=(
+            f"Last 429/418: <code>{rl_path}</code> · status <b>{rl_status}</b> · "
+            f"weight <b>{rl_weight}</b> · Retry-After <b>{rl_retry or '—'}</b>\n"
+        )
     storage="PERSISTENT /data" if h.db_persistent else "LOCAL / MAY RESET"
     lat="N/A" if h.rest_latency_ms<0 else f"{h.rest_latency_ms:.0f} ms"
     candle="N/A" if h.candle_age_sec<0 else f"{h.candle_age_sec:.0f} sec"
     skew="N/A" if h.server_clock_skew_ms<0 else f"{h.server_clock_skew_ms/1000:+.1f} sec"
     checked=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     return (
-        "📡 <b>PRODUCTION HEALTH · V11.21.5</b>\n━━━━━━━━━━━━━━━━━━\n"
+        "📡 <b>PRODUCTION HEALTH · V11.21.6</b>\n━━━━━━━━━━━━━━━━━━\n"
         f"Проверено: <b>{checked}</b>\n"
         f"{icon} Статус: <b>{h.status}</b>\n"
         f"REST latency: <b>{lat}</b>\n"
@@ -189,6 +215,7 @@ def text(h):
         f"Clock skew: <b>{skew}</b>\n"
         f"Binance weight 1m: <b>{used_weight}</b> · soft ceiling <b>{SOFT_WEIGHT_CEILING}</b>\n"
         f"Cooldown: <b>{cooldown:.0f}s</b>\n"
+        f"{rl_line}"
         f"WebSocket: <b>{'ONLINE' if h.ws_connected and h.ws_age_sec<=45 else 'DEGRADED'}</b>\n"
         f"Database: <b>{'OK' if h.db_ok else 'ERROR'}</b> · <b>{storage}</b>\n"
         f"Path: <code>{h.db_path}</code>\n"

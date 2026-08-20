@@ -1,4 +1,4 @@
-"""Korkovts Signal AI V11.21.5 · CODE-QUALITY AUDITED SIGNAL ENGINE."""
+"""Korkovts Signal AI V11.21.6 · CODE-QUALITY AUDITED SIGNAL ENGINE."""
 from __future__ import annotations
 import asyncio
 import re
@@ -54,12 +54,51 @@ install_v11200_after_base()
 from v11210_signal_engine import install as install_v11210_signal_engine
 install_v11210_signal_engine(base)
 
-APP_VERSION="11.21.5"
+APP_VERSION="11.21.6"
 base.APP_VERSION=APP_VERSION
 base.config.APP_VERSION=APP_VERSION
 base.core.APP_VERSION=APP_VERSION
 
-# V11.21.5 concurrency contract.
+# V11.21.6 concurrency contract.
+# V11.21.6 Production data reuse.
+_original_indicator_edge_one_v11216=getattr(base,"_annotate_indicator_edge_one",None)
+if _original_indicator_edge_one_v11216 is not None:
+    async def _annotate_indicator_edge_one_v11216(signal):
+        interval="15m" if str(getattr(signal,"timeframe","1H")).upper()=="15M" else "1h"
+        try:
+            async with base._indicator_edge_sem:
+                frame=await asyncio.wait_for(
+                    base.core.get_klines(signal.symbol,interval,350),
+                    timeout=8,
+                )
+            validation=base.no_future_rows(frame,__import__("time").time())
+            signal.feature_snapshot.setdefault("validation_v11170",{}).update(
+                validation.as_dict()|{"schema":"11.21.6-reused-alpha-flow"}
+            )
+            if not validation.eligible:
+                raise RuntimeError(f"indicator lookahead guard: {validation.reason}")
+            coverage=float(getattr(signal,"alpha_agg_coverage_sec",0) or 0)
+            imbalance=(float(getattr(signal,"alpha_ofi_recent",0) or 0) if coverage>=5.0 else None)
+            base.annotate_indicator_edge(signal,frame,imbalance)
+            signal.feature_snapshot.setdefault("indicator_edge_v11151",{}).update({
+                "v11216_reused_alpha_flow":True,
+                "agg_coverage_sec":coverage,
+                "data_source":"Alpha aggTrades + shared 350-bar candle cache",
+            })
+        except Exception as exc:
+            signal.indicator_edge_score=0.0
+            signal.indicator_edge_support=0
+            signal.indicator_edge_auto=False
+            signal.indicator_edge_prime=False
+            signal.feature_snapshot.setdefault("indicator_edge_v11151",{}).update({
+                "schema":"11.21.6-indicator-edge-reuse",
+                "available":False,"auto_eligible":False,"prime_eligible":False,
+                "blockers":[f"indicator data unavailable: {type(exc).__name__}"],
+                "negative_only":True,"professional_rank_changed":False,
+            })
+        return signal
+    base._annotate_indicator_edge_one=_annotate_indicator_edge_one_v11216
+
 _v11205_research_gate=asyncio.Lock()
 
 @asynccontextmanager
@@ -105,7 +144,7 @@ base.health_check=_v11196_health.check
 base.health_text=_v11196_health.text
 
 
-# V11.21.5 HEALTH FIX
+# V11.21.6 HEALTH FIX
 # The inherited callback detached HEALTH into a background UI task. If that task
 # failed or timed out, Telegram showed no new card and the user only saw stale
 # PAUSE. Intercept HEALTH directly: ACK immediately, bounded forced refresh,
@@ -134,17 +173,17 @@ async def _callback_v11203(update,context):
             reply_markup=base.main_menu(),
         )
     except Exception as exc:
-        base.core.log.exception("V11.21.5 HEALTH refresh failed")
+        base.core.log.exception("V11.21.6 HEALTH refresh failed")
         try:
             await query.message.reply_text(
-                "⚠️ <b>HEALTH CHECK FAILED · V11.21.5</b>\\n"
+                "⚠️ <b>HEALTH CHECK FAILED · V11.21.6</b>\\n"
                 f"Причина: <code>{type(exc).__name__}: {str(exc)[:240]}</code>\\n"
                 "Старый PAUSE не считается новым результатом этой проверки.",
                 parse_mode=base.ParseMode.HTML,
                 reply_markup=base.main_menu(),
             )
         except Exception:
-            base.core.log.exception("V11.21.5 HEALTH error reply failed")
+            base.core.log.exception("V11.21.6 HEALTH error reply failed")
     return None
 
 base.core.callback=_callback_v11203
@@ -178,7 +217,7 @@ base.spot_fresh_derivatives_risk=_delivery_spot_crowding
 def _v11207_blocked_diag(reason):
     return {"status":"blocked","reason":str(reason or ""),"liquid":0,"prefiltered":0,"deep_checked":0,"final":0,"production_pool":0,"production_rejects":0,"scan_started":False}
 
-# 7) V11.21.5 scan-lock scheduler parity.
+# 7) V11.21.6 scan-lock scheduler parity.
 # A legitimate full-universe scan may take close to its bounded ~3-minute
 # budget. The previous 90s wait was incompatible with that design.
 async def _run_automatic_scan_v11194(context,scanner_fn,label):
@@ -201,7 +240,7 @@ async def _run_automatic_scan_v11194(context,scanner_fn,label):
                     context.bot,chats,_v11207_blocked_diag(reason),
                     scan_error=f"PRODUCTION HEALTH PAUSE: {reason}",
                 )
-            base.core.log.warning("V11.21.5 automatic %s skipped before scan: health PAUSE",label)
+            base.core.log.warning("V11.21.6 automatic %s skipped before scan: health PAUSE",label)
             return
 
         from v11191_futures_engine import FULL_SCAN_BUDGET_SEC
@@ -242,7 +281,7 @@ async def _run_automatic_scan_v11194(context,scanner_fn,label):
                     triggered+=1
 
         base.core.log.info(
-            "V11.21.5 automatic %s setups=%s armed=%s cancelled=%s "
+            "V11.21.6 automatic %s setups=%s armed=%s cancelled=%s "
             "entry_now=%s",
             label,len(fresh),armed,cancelled,triggered,
         )
@@ -252,7 +291,7 @@ async def _run_automatic_scan_v11194(context,scanner_fn,label):
                 fresh_setups=len(fresh),triggered=triggered,
             )
     except Exception as exc:
-        base.core.log.exception("V11.21.5 automatic %s scan failed",label)
+        base.core.log.exception("V11.21.6 automatic %s scan failed",label)
         if heartbeat and chats:
             await base._send_auto_heartbeat(
                 context.bot,chats,base.scanner.scan_status().get("main",{}),
@@ -262,7 +301,7 @@ async def _run_automatic_scan_v11194(context,scanner_fn,label):
 base.core._run_automatic_scan=_run_automatic_scan_v11194
 
 
-# V11.21.5 truthful AUTO heartbeat.
+# V11.21.6 truthful AUTO heartbeat.
 # A 0→0→0→0 funnel is not a market result when Health/lock prevented startup.
 _original_heartbeat_text_v11206=base.heartbeat_text
 
@@ -325,7 +364,7 @@ def _heartbeat_text_v11206(diagnostics,**kwargs):
 
 base.heartbeat_text=_heartbeat_text_v11206
 
-# 8) V11.21.5 truthful scan diagnostics.
+# 8) V11.21.6 truthful scan diagnostics.
 # Legacy manual handlers collapsed every exception into "mandatory source unavailable".
 # Keep safety fail-closed, but surface the actual stage/reason to Telegram.
 
@@ -397,7 +436,7 @@ async def _prime_scan_cmd_v11199(update,context):
             diagnostics=base.core.scan_status().get("main")
         )
     except Exception as exc:
-        base.core.log.exception("V11.21.5 manual market scan failed")
+        base.core.log.exception("V11.21.6 manual market scan failed")
         text=_v11199_scan_error_text(
             exc,base.core.scan_status().get("main"),"Futures"
         )
@@ -412,7 +451,7 @@ base.core.scan_cmd=_prime_scan_cmd_v11199
 
 
 
-# V11.21.5 truthful manual Spot diagnostics.
+# V11.21.6 truthful manual Spot diagnostics.
 if hasattr(base,"spot_cmd"):
     async def _spot_cmd_v11202(update,context):
         msg=update.effective_message
@@ -427,7 +466,7 @@ if hasattr(base,"spot_cmd"):
                 context.bot,update.effective_chat.id,results,automatic=False
             )
         except Exception as exc:
-            base.core.log.exception("V11.21.5 Spot manual scan failed")
+            base.core.log.exception("V11.21.6 Spot manual scan failed")
             d=dict(base.spot_scan_status() or {})
             reason=str(d.get("reason") or f"{type(exc).__name__}: {exc}")
             await msg.reply_text(
@@ -456,7 +495,7 @@ if hasattr(base,"short_scan_cmd_v1142"):
                 diagnostics=base.core.scan_status().get("short")
             )
         except Exception as exc:
-            base.core.log.exception("V11.21.5 manual short scan failed")
+            base.core.log.exception("V11.21.6 manual short scan failed")
             text=_v11199_scan_error_text(
                 exc,base.core.scan_status().get("short"),"FAST Futures"
             )
@@ -467,7 +506,7 @@ if hasattr(base,"short_scan_cmd_v1142"):
     base.core.short_scan_cmd=_short_scan_cmd_v11199
 
 
-# V11.21.5: Spot Watchtower also consumes Futures derivatives REST for each
+# V11.21.6: Spot Watchtower also consumes Futures derivatives REST for each
 # watched counterpart. It must never overlap the 36->14 Futures research pass.
 # ENTRY NOW is deliberately NOT put behind this gate.
 _original_spot_watch_job_v11213=getattr(base,"spot_watch_job",None)
@@ -476,7 +515,7 @@ if _original_spot_watch_job_v11213 is not None:
         # If a heavy scan owns the slot, skip this 2-minute watch tick. The next
         # watch tick will revalidate; do not queue behind a 2-3 minute scan.
         if _v11205_research_gate.locked():
-            base.core.log.info("V11.21.5 Spot Watchtower skipped: research gate busy")
+            base.core.log.info("V11.21.6 Spot Watchtower skipped: research gate busy")
             return
         acquired=False
         try:
@@ -488,13 +527,13 @@ if _original_spot_watch_job_v11213 is not None:
             health=await base.health_check(force=True)
             base._last_health=health
             if bool(getattr(health,"hard_pause",False)) or str(getattr(health,"status","")).upper()=="PAUSE":
-                base.core.log.warning("V11.21.5 Spot Watchtower skipped: Production Health PAUSE")
+                base.core.log.warning("V11.21.6 Spot Watchtower skipped: Production Health PAUSE")
                 return
 
             # Legacy/manual scan lock is a second guard against any unwrapped
             # research path that may already be active.
             if base.core._scan_lock.locked():
-                base.core.log.info("V11.21.5 Spot Watchtower skipped: scan lock busy")
+                base.core.log.info("V11.21.6 Spot Watchtower skipped: scan lock busy")
                 return
 
             return await _original_spot_watch_job_v11213(context)

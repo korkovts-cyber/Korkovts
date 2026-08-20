@@ -80,8 +80,8 @@ checks={
  "Health recheck inside scan lock":b.count("health=await base.health_check(force=True)")>=3,
  "Direct bounded HEALTH callback":"_callback_v11203" in b and 'data!="v112:health"' in b and "timeout=15" in b,
  "HEALTH updates runtime snapshot":"base._last_health=health" in b,
- "HEALTH always reports failure":"HEALTH CHECK FAILED · V11.21.5" in b,
- "HEALTH card timestamp":"PRODUCTION HEALTH · V11.21.5" in api and "Проверено:" in api,
+ "HEALTH always reports failure":"HEALTH CHECK FAILED · V11.21.6" in b,
+ "HEALTH card timestamp":"PRODUCTION HEALTH · V11.21.6" in api and "Проверено:" in api,
  "PRIME actual callback binding":"base.core.scan_cmd=_prime_scan_cmd_v11199" in b,
  "FAST actual callback binding":"base.core.short_scan_cmd=_short_scan_cmd_v11199" in b,
  "FAST shared lock":"async def _short_scan_cmd_v11199" in b and "async with _v11205_full_scan_guard" in b[b.index("async def _short_scan_cmd_v11199"):],
@@ -93,7 +93,7 @@ checks={
  "Current error beats stale diagnostics":"priority_tokens" in b and "full-market research lock timeout" in b,
  "Zero funnel truth":"_heartbeat_text_v11206" in b and "СКАН НЕ ЗАПУЩЕН / НЕТ ПОЛНОГО ПРОХОДА" in b,
  "Runtime health synchronized":b.count("base._last_health=health")>=5,
- "Data architecture version synchronized":"V11.21.5" in data_arch,
+ "Data architecture version synchronized":"V11.21.6" in data_arch,
  "429 telemetry before raise":"_telemetry_raw_get" in api and 'governor._raw_get=_telemetry_raw_get' in api,
  "Weight-aware endpoint reservation":"_estimated_weight" in api and "_soft_weight_guard(path,params)" in api,
  "Lower safe research pace":'V11200_RESEARCH_RPS","4.5"' in data_arch,
@@ -103,7 +103,7 @@ checks={
  "Spot BUY READY lane":"spot_v11210" in spot and "BUY READY" in spot,
  "Entry two-of-three live consensus":"2-of-3 micro consensus" in signal_engine,
  "Hard evidence conflicts preserved":"audit.hard_conflicts" in signal_engine,
- "Fresh cohort isolation":"11.21.5-signal-engine" in signal_engine and "11.21.5-spot-signal-engine" in signal_engine,
+ "Fresh cohort isolation":"11.21.6-signal-engine" in signal_engine and "11.21.6-spot-signal-engine" in signal_engine,
  "Meta history shadow-only":"meta_decide_shadow" in signal_engine and "meta_shadow_only" in signal_engine,
  "Adaptive history shadow-only":"adaptive_gate_shadow" in signal_engine and "adaptive_shadow_only" in signal_engine,
  "Entry history shadow-only":"entry_negative_penalty_shadow" in signal_engine,
@@ -120,13 +120,17 @@ checks={
  "Research RPS env cap":"min(4.5" in data_arch and "min(6.0" not in data_arch,
  "Soft ceiling env cap":"min(1150" in api and "),1150)" in data_arch,
  "Legacy diagnostic isolation":"production_keys" in futures and "update(compat[kind])" not in futures,
- "V11.21.5 Futures cohort":"FUTURES_COHORT=\"11.21.5-signal-engine\"" in signal_engine and "entry_base.FUTURES_RELEASE_KEY=FUTURES_COHORT" in signal_engine,
- "V11.21.5 Spot cohort":"SPOT_COHORT=\"11.21.5-spot-signal-engine\"" in signal_engine and "spot_watch.SPOT_RELEASE_KEY=SPOT_COHORT" in signal_engine,
+ "Indicator reuses Alpha flow":"_annotate_indicator_edge_one_v11216" in b and "alpha_ofi_recent" in b,
+ "Rate-limit endpoint attribution":"last_rate_limit_path" in api and "last_rate_limit_weight" in api,
+ "Health rate-limit attribution":"Last 429/418:" in api,
+ "75s bulk ticker reuse":'ticker/24hr"): return 75.0' in data_arch,
+ "V11.21.6 Futures cohort":"FUTURES_COHORT=\"11.21.6-signal-engine\"" in signal_engine and "entry_base.FUTURES_RELEASE_KEY=FUTURES_COHORT" in signal_engine,
+ "V11.21.6 Spot cohort":"SPOT_COHORT=\"11.21.6-spot-signal-engine\"" in signal_engine and "spot_watch.SPOT_RELEASE_KEY=SPOT_COHORT" in signal_engine,
  "Strong annotation coherent":"v11211_state_coherent" in signal_engine and "base.annotate_strong_signals=strong_annotate_many" in signal_engine,
  "Spot dedupe cohort aware":"COALESCE(s.release_version,'')=?" in signal_engine and "base.spot_was_sent_recently=spot_was_sent_recently_current" in signal_engine,
  "Truthful Spot manual diagnostics":"_spot_cmd_v11202" in b and "Spot scan не завершён" in b,
 }
 failed=[k for k,v in checks.items() if not v]
 if failed:
-    raise SystemExit("V11.21.5 RELEASE CHECK FAILED: "+", ".join(failed))
-print("V11.21.5 RELEASE CHECK: OK")
+    raise SystemExit("V11.21.6 RELEASE CHECK FAILED: "+", ".join(failed))
+print("V11.21.6 RELEASE CHECK: OK")

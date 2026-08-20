@@ -1,4 +1,4 @@
-"""Korkovts V11.21.5 · CODE-QUALITY AUDITED FULL-UNIVERSE FUTURES ENGINE.
+"""Korkovts V11.21.6 · CODE-QUALITY AUDITED FULL-UNIVERSE FUTURES ENGINE.
 
 Goal:
 - evaluate the whole liquid Binance USD-M perpetual universe before any hard technical gate;
@@ -35,7 +35,7 @@ import app.scanner as legacy
 from v11197_sources import mandatory_sources, status as mandatory_source_status
 from v11198_deep_screen import screen as quick_deep_screen, select_full_deep, FULL_DEEP_TARGET, MIN_SCREEN_COVERAGE
 
-# V11.21.5: stale Railway env may make the budget longer, never shorter than the architecture needs.
+# V11.21.6: stale Railway env may make the budget longer, never shorter than the architecture needs.
 FULL_SCAN_BUDGET_SEC = max(170, min(240, int(os.getenv("V11194_FULL_SCAN_BUDGET_SEC", "175"))))
 SOURCE_STAGE_TIMEOUT_SEC = max(15, min(45, int(os.getenv("V11194_SOURCE_TIMEOUT_SEC", "30"))))
 FRAME_STAGE_MAX_SEC = max(45, min(120, int(os.getenv("V11194_FRAME_STAGE_MAX_SEC", "90"))))
@@ -440,7 +440,7 @@ def _momentum_fallback(symbol,timeframe,base,higher,lower,side,d,market_context,
         soft+=3.0 if (taker>=1.03 if long else taker<=.97) else 0.0
         raw=max(float(min_score),soft)
         reasons=[
-            "V11.21.5 momentum-continuation lane",
+            "V11.21.6 momentum-continuation lane",
             f"HTF trend aligned · ADX {adx:.0f} · efficiency {eff:.2f}",
             f"distance EMA20 {dist:+.2f} ATR",
             f"taker {taker:.2f} · OI {oi_change:+.1f}% · spread {spread:.1f}bps",

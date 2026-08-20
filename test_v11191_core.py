@@ -2,7 +2,7 @@ import ast
 import unittest
 from pathlib import Path
 
-class V112150Contracts(unittest.TestCase):
+class V112160Contracts(unittest.TestCase):
     def test_futures_full_universe_before_deep(self):
         s=Path("v11191_futures_engine.py").read_text()
         self.assertIn("full_universe_ranked",s)
@@ -376,12 +376,12 @@ class V112150Contracts(unittest.TestCase):
 
     def test_v112003_health_failure_is_visible(self):
         s=Path("bot_v11191.py").read_text()
-        self.assertIn("HEALTH CHECK FAILED · V11.21.5",s)
+        self.assertIn("HEALTH CHECK FAILED · V11.21.6",s)
         self.assertIn("Старый PAUSE не считается новым результатом",s)
 
     def test_v112003_health_card_has_version_and_timestamp(self):
         s=Path("v11196_api_resilience.py").read_text()
-        self.assertIn("PRODUCTION HEALTH · V11.21.5",s)
+        self.assertIn("PRODUCTION HEALTH · V11.21.6",s)
         self.assertIn("Проверено:",s)
         self.assertIn("datetime.now(timezone.utc)",s)
 
@@ -447,7 +447,7 @@ class V112150Contracts(unittest.TestCase):
 
     def test_v112006_data_architecture_version_is_current(self):
         s=Path("v11200_data_architecture.py").read_text()
-        self.assertIn("V11.21.5",s)
+        self.assertIn("V11.21.6",s)
         self.assertNotIn("V11.20.2",s)
 
     def test_v112007_reads_weight_header_even_on_429(self):
@@ -459,7 +459,7 @@ class V112150Contracts(unittest.TestCase):
 
     def test_v112007_ticker_is_paced_and_cached(self):
         s=Path("v11200_data_architecture.py").read_text(); critical=s[s.index("def _critical"):s.index("def _realtime")]
-        self.assertNotIn('path.endswith("/ticker/24hr")',critical); self.assertIn('if path.endswith("/ticker/24hr"): return 8.0',s)
+        self.assertNotIn('path.endswith("/ticker/24hr")',critical); self.assertIn('if path.endswith("/ticker/24hr"): return 75.0',s)
 
     def test_v112007_blocked_auto_clears_stale_funnel(self):
         s=Path("bot_v11191.py").read_text(); self.assertIn("_v11207_blocked_diag",s); self.assertIn('"scan_started":False',s)
@@ -495,13 +495,13 @@ class V112150Contracts(unittest.TestCase):
 
     def test_v112110_new_decision_engine_has_fresh_futures_cohort(self):
         s=Path("v11210_signal_engine.py").read_text()
-        self.assertIn('FUTURES_COHORT="11.21.5-signal-engine"',s)
+        self.assertIn('FUTURES_COHORT="11.21.6-signal-engine"',s)
         self.assertIn("entry_base.FUTURES_RELEASE_KEY=FUTURES_COHORT",s)
         self.assertIn("base.db.STRATEGY_VERSION=FUTURES_COHORT",s)
 
     def test_v112110_spot_watch_and_signal_cohorts_are_synchronized(self):
         s=Path("v11210_signal_engine.py").read_text()
-        self.assertIn('SPOT_COHORT="11.21.5-spot-signal-engine"',s)
+        self.assertIn('SPOT_COHORT="11.21.6-spot-signal-engine"',s)
         self.assertIn("spot_db.SPOT_RELEASE_VERSION=SPOT_COHORT",s)
         self.assertIn("spot_watch.SPOT_RELEASE_KEY=SPOT_COHORT",s)
 
@@ -633,6 +633,34 @@ class V112150Contracts(unittest.TestCase):
         block=s[s.index("def scan_status"):s.index("def _finish",s.index("def scan_status"))]
         self.assertIn('"production_pool" in raw',block)
         self.assertIn('int(dst.get("deep_complete",0) or 0)>0',block)
+
+    def test_v11216_indicator_reuses_alpha_aggtrade_snapshot(self):
+        s=Path("bot_v11191.py").read_text()
+        start=s.index("_original_indicator_edge_one_v11216")
+        end=s.index("_v11205_research_gate=asyncio.Lock()",start)
+        block=s[start:end]
+        self.assertIn("alpha_ofi_recent",block)
+        self.assertIn("alpha_agg_coverage_sec",block)
+        self.assertNotIn("_recent_aggressor(",block)
+
+    def test_v11216_indicator_uses_alpha_candle_cache_key(self):
+        s=Path("bot_v11191.py").read_text()
+        start=s.index("_original_indicator_edge_one_v11216")
+        end=s.index("_v11205_research_gate=asyncio.Lock()",start)
+        block=s[start:end]
+        self.assertIn("get_klines(signal.symbol,interval,350)",block)
+
+    def test_v11216_rate_limit_records_exact_endpoint(self):
+        s=Path("v11196_api_resilience.py").read_text()
+        self.assertIn("last_rate_limit_path",s)
+        self.assertIn("last_rate_limit_status",s)
+        self.assertIn("last_rate_limit_weight",s)
+        self.assertIn("last_rate_limit_retry_after",s)
+
+    def test_v11216_health_displays_rate_limit_attribution(self):
+        s=Path("v11196_api_resilience.py").read_text()
+        self.assertIn("Last 429/418:",s)
+        self.assertIn("Retry-After",s)
 
 if __name__=="__main__":
     unittest.main()
