@@ -1,0 +1,13 @@
+Upload ALL files from this ZIP to the repository root.
+Replace railway.toml and predecessor preflight/test files when prompted.
+Do not delete the existing V11.21.6 production source modules.
+
+Final Railway process:
+python bot_v11220.py
+
+Expected final checks:
+V11.21.7 PREFLIGHT: OK
+V11.21.8 PREFLIGHT: OK
+V11.21.9 PREFLIGHT: OK
+V11.22.0 PREFLIGHT: OK
+All V11217/V11218/V11219/V11220 contract tests: OK

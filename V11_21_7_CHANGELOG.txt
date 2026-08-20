@@ -1,0 +1,38 @@
+KORKOVTS SIGNAL AI V11.21.7 · RELIABILITY + SPOT AUTO
+
+FINAL AUDIT RESULT
+- V11.18 Production wrapper is explicitly preserved. The reliability layer patches only the raw scanner hook and can never bypass Production / Alpha / execution / evidence / Strong / Indicator / Adaptive / Final Risk / ENTRY NOW.
+- Added V11.21.7 preflight + regression contract that fails deployment if a future edit accidentally routes Telegram/AUTO directly to the raw scanner.
+
+FUTURES RELIABILITY
+- Full-scan budget expanded for conservative API pacing and minute-boundary recovery.
+- Expensive full-deep snapshots are serialized one candidate at a time. Internal snapshot components still run concurrently.
+- Before each full-deep snapshot, the bot checks real Binance cooldown and current request-weight minute. If the minute is already too busy, it waits BEFORE starting the freshness timer.
+- 429/418 cooldown is respected in full, then a fresh snapshot is attempted; no retry burst inside the cooldown.
+- One controlled retry is allowed for transient deep acquisition failure.
+- Incomplete derivatives data may be rebuilt once, but no signal can pass without the original deep_data contract.
+- API failures are separated from strategy rejections. If too much of 14-name full-deep was not verified and no signal survived, Telegram receives an incomplete-scan error instead of a false “no signals”.
+- AUTO heartbeat reports Full-deep verified X/Y.
+
+BINANCE LOAD CONTROL
+- Research pacing capped at 4.0 requests/sec.
+- General analysis concurrency capped at 3.
+- Soft weight ceiling capped at 1050.
+- Full-deep start guard begins protecting the next snapshot once current-minute weight reaches 820.
+- Health / ENTRY NOW keep priority and existing fail-closed behavior.
+
+SPOT AUTO
+- AUTO subscription controls both Futures and Spot.
+- Full Spot discovery every 15 minutes.
+- Spot WATCH promotion check every 1 minute.
+- WATCH no longer instantly skips merely because Futures owns the research slot; it waits up to 45 seconds and safely defers if still busy.
+- Spot AUTO performs Production Health preflight.
+- Fresh deploy receives an early Spot AUTO bootstrap after 75 seconds.
+- AUTO ON explicitly confirms Spot AUTO is enabled.
+- 10-minute AUTO heartbeat shows Spot AUTO ON, active WATCH count and READY count.
+- Spot entry still requires BUY NOW with persistent 2/2 confirmation and live delivery revalidation.
+
+SAFETY UNCHANGED
+- No forced quota signals.
+- No fabricated BUY/LONG/SHORT.
+- Existing live execution, order-flow, news, crowding, correlation, portfolio and risk vetoes remain authoritative.

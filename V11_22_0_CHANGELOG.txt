@@ -1,0 +1,19 @@
+V11.22.0 DEEP AUDIT
+
+Additional confirmed state-machine bugs fixed:
+
+1) BUY READY remained partly self-cancelling in NEUTRAL:
+   the lane that created BUY accepts score>=78 / RS>=70 after its own hard
+   safety checks, but V11.21.9 still used 80/75 downstream. V11.22.0 aligns
+   downstream to 78/70 only for a candidate already marked BUY by that lane.
+   Independent-evidence penalties and all hard vetoes still apply.
+
+2) A 15-minute broad Spot WATCH refresh could erase a local-L2 READY 1/2:
+   broad discovery calls upsert(WATCH), whose legacy SQL resets confirm_streak.
+   V11.22.0 preserves exactly the existing 1/2 only for materially unchanged
+   geometry. A fresh 1-minute watchtower revalidation returning WATCH still
+   calls reset_spot_ready and immediately clears the proof.
+
+No forced trades. No synthetic 2/2. Futures/API fixes from V11.21.7,
+Spot geometry persistence from V11.21.8, and READY/L2 priority from V11.21.9
+remain active.

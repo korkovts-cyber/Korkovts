@@ -1,0 +1,22 @@
+KORKOVTS SIGNAL AI V11.21.8 · SPOT BUY-NOW PERSISTENCE FIX
+
+ROOT CAUSE FOUND
+The Spot watch table reset confirm_streak whenever entry_low, entry_high or
+invalidation changed by exact floating-point inequality. Fresh full revalidation
+recalculates EMA/ATR-derived geometry every pass, so a legitimate BUY could be
+reset to 0 immediately before record_ready(). The practical result was a repeated
+READY 1/2 loop and almost no path to SPOT BUY NOW.
+
+FIX
+- Preserve a prior READY confirmation only when a fresh BUY is materially the
+  same setup and its entry corridor/invalidation moved only within bounded tolerance.
+- Different setup, WATCH downgrade, large geometry move or invalidation still resets.
+- The prior confirmation is restored only; the patch never creates an extra confirmation.
+- The next separated full BUY revalidation must still produce confirmation 2/2.
+- Pre-zone check now allows a tiny buffer only to run fresh revalidation. The fresh
+  strategy must still return BUY in its current exact zone.
+- Portfolio cap, correlation veto, order-book health, flow, news/crowding,
+  invalidation and live Telegram delivery revalidation remain authoritative.
+- AUTO heartbeat now shows the top Spot WATCH candidate and exact last blocker/reason.
+
+V11.21.7 FUTURES/API RELIABILITY REMAINS INCLUDED.
