@@ -2,7 +2,7 @@ import ast
 import unittest
 from pathlib import Path
 
-class V112130Contracts(unittest.TestCase):
+class V112150Contracts(unittest.TestCase):
     def test_futures_full_universe_before_deep(self):
         s=Path("v11191_futures_engine.py").read_text()
         self.assertIn("full_universe_ranked",s)
@@ -123,7 +123,8 @@ class V112130Contracts(unittest.TestCase):
     def test_scan_has_real_deadline_not_post_gather_budget(self):
         s=Path("v11191_futures_engine.py").read_text()
         self.assertIn("deadline = started + FULL_SCAN_BUDGET_SEC",s)
-        self.assertIn("asyncio.wait(frame_tasks",s)
+        self.assertIn("asyncio.wait(primary_tasks",s)
+        self.assertIn("asyncio.wait(extra_tasks",s)
         self.assertIn("frame_pending_cancelled",s)
         self.assertIn("deep_deadline_cancelled",s)
         self.assertNotIn("frame_rows = await asyncio.gather",s)
@@ -375,12 +376,12 @@ class V112130Contracts(unittest.TestCase):
 
     def test_v112003_health_failure_is_visible(self):
         s=Path("bot_v11191.py").read_text()
-        self.assertIn("HEALTH CHECK FAILED · V11.21.3",s)
+        self.assertIn("HEALTH CHECK FAILED · V11.21.5",s)
         self.assertIn("Старый PAUSE не считается новым результатом",s)
 
     def test_v112003_health_card_has_version_and_timestamp(self):
         s=Path("v11196_api_resilience.py").read_text()
-        self.assertIn("PRODUCTION HEALTH · V11.21.3",s)
+        self.assertIn("PRODUCTION HEALTH · V11.21.5",s)
         self.assertIn("Проверено:",s)
         self.assertIn("datetime.now(timezone.utc)",s)
 
@@ -446,7 +447,7 @@ class V112130Contracts(unittest.TestCase):
 
     def test_v112006_data_architecture_version_is_current(self):
         s=Path("v11200_data_architecture.py").read_text()
-        self.assertIn("V11.21.3",s)
+        self.assertIn("V11.21.5",s)
         self.assertNotIn("V11.20.2",s)
 
     def test_v112007_reads_weight_header_even_on_429(self):
@@ -494,13 +495,13 @@ class V112130Contracts(unittest.TestCase):
 
     def test_v112110_new_decision_engine_has_fresh_futures_cohort(self):
         s=Path("v11210_signal_engine.py").read_text()
-        self.assertIn('FUTURES_COHORT="11.21.3-signal-engine"',s)
+        self.assertIn('FUTURES_COHORT="11.21.5-signal-engine"',s)
         self.assertIn("entry_base.FUTURES_RELEASE_KEY=FUTURES_COHORT",s)
         self.assertIn("base.db.STRATEGY_VERSION=FUTURES_COHORT",s)
 
     def test_v112110_spot_watch_and_signal_cohorts_are_synchronized(self):
         s=Path("v11210_signal_engine.py").read_text()
-        self.assertIn('SPOT_COHORT="11.21.3-spot-signal-engine"',s)
+        self.assertIn('SPOT_COHORT="11.21.5-spot-signal-engine"',s)
         self.assertIn("spot_db.SPOT_RELEASE_VERSION=SPOT_COHORT",s)
         self.assertIn("spot_watch.SPOT_RELEASE_KEY=SPOT_COHORT",s)
 
@@ -561,7 +562,7 @@ class V112130Contracts(unittest.TestCase):
 
     def test_v11213_heartbeat_exposes_top_blockers(self):
         s=Path("bot_v11191.py").read_text()
-        self.assertIn("🧬 Deep funnel",s)
+        self.assertIn("🧬 Analysis funnel",s)
         self.assertIn("🧱 Главные блокеры",s)
         self.assertIn("🔬 Ближайший",s)
 
@@ -570,6 +571,68 @@ class V112130Contracts(unittest.TestCase):
         self.assertIn("Binance weight 1m",s)
         self.assertIn("SOFT_WEIGHT_CEILING",s)
         self.assertIn("cooldown_seconds",s)
+
+    def test_v11214_primary_pass_covers_every_liquid_symbol(self):
+        s=Path("v11191_futures_engine.py").read_text()
+        self.assertIn("for symbol in liquid",s)
+        self.assertIn("_primary_frame",s)
+        self.assertIn("primary_frame_coverage",s)
+        self.assertIn("primary_coverage < .90",s)
+
+    def test_v11214_only_ranked_subset_gets_extra_two_timeframes(self):
+        s=Path("v11191_futures_engine.py").read_text()
+        self.assertIn('V11214_MULTIFRAME_TARGET", "72"',s)
+        self.assertIn("_extra_frames",s)
+        self.assertIn("for row in selected",s)
+        self.assertIn("multiframe_coverage",s)
+
+    def test_v11214_old_impossible_491x3_path_is_removed(self):
+        s=Path("v11191_futures_engine.py").read_text()
+        stage=s[s.index("# Stage 1A:"):s.index("ranked.sort",s.index("# Stage 1A:"))]
+        self.assertNotIn("_frames(symbol,kind,sem)",stage)
+        self.assertNotIn("for symbol in observed",stage)
+        self.assertIn("for symbol in liquid",stage)
+
+    def test_v11214_request_budget_is_structurally_reduced(self):
+        s=Path("v11191_futures_engine.py").read_text()
+        self.assertIn("MULTIFRAME_TARGET",s)
+        self.assertIn("primary_budget=min(65.0",s)
+        self.assertIn("extra_budget=min(55.0",s)
+
+    def test_v11214_ui_exposes_primary_to_multiframe_funnel(self):
+        s=Path("bot_v11191.py").read_text()
+        self.assertIn("liquid-primary",s)
+        self.assertIn("multi-TF",s)
+
+    def test_v11215_railway_cannot_shorten_full_scan_below_architecture_floor(self):
+        s=Path("v11191_futures_engine.py").read_text()
+        self.assertIn("FULL_SCAN_BUDGET_SEC = max(170",s)
+
+    def test_v11215_railway_cannot_raise_research_rps(self):
+        s=Path("v11200_data_architecture.py").read_text()
+        self.assertIn("min(4.5",s)
+        self.assertNotIn("min(6.0",s)
+
+    def test_v11215_railway_cannot_raise_soft_weight_ceiling(self):
+        api=Path("v11196_api_resilience.py").read_text()
+        data=Path("v11200_data_architecture.py").read_text()
+        self.assertIn("min(1150",api)
+        self.assertIn("),1150)",data)
+
+    def test_v11215_legacy_scan_status_cannot_overwrite_new_funnel(self):
+        s=Path("v11191_futures_engine.py").read_text()
+        block=s[s.index("def scan_status"):s.index("def _finish",s.index("def scan_status"))]
+        self.assertNotIn("update(compat[kind])",block)
+        self.assertIn("production_keys",block)
+        self.assertIn('dst["production"]=prod',block)
+        self.assertNotIn('dst["status"]=',block)
+        self.assertNotIn('dst["reason"]=',block)
+
+    def test_v11215_production_final_requires_current_deep_completion(self):
+        s=Path("v11191_futures_engine.py").read_text()
+        block=s[s.index("def scan_status"):s.index("def _finish",s.index("def scan_status"))]
+        self.assertIn('"production_pool" in raw',block)
+        self.assertIn('int(dst.get("deep_complete",0) or 0)>0',block)
 
 if __name__=="__main__":
     unittest.main()

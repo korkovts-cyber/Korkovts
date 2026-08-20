@@ -1,4 +1,4 @@
-"""Korkovts V11.21.3 · CODE-QUALITY AUDITED FULL-UNIVERSE FUTURES ENGINE.
+"""Korkovts V11.21.5 · CODE-QUALITY AUDITED FULL-UNIVERSE FUTURES ENGINE.
 
 Goal:
 - evaluate the whole liquid Binance USD-M perpetual universe before any hard technical gate;
@@ -35,13 +35,15 @@ import app.scanner as legacy
 from v11197_sources import mandatory_sources, status as mandatory_source_status
 from v11198_deep_screen import screen as quick_deep_screen, select_full_deep, FULL_DEEP_TARGET, MIN_SCREEN_COVERAGE
 
-FULL_SCAN_BUDGET_SEC = max(120, min(240, int(os.getenv("V11194_FULL_SCAN_BUDGET_SEC", "175"))))
+# V11.21.5: stale Railway env may make the budget longer, never shorter than the architecture needs.
+FULL_SCAN_BUDGET_SEC = max(170, min(240, int(os.getenv("V11194_FULL_SCAN_BUDGET_SEC", "175"))))
 SOURCE_STAGE_TIMEOUT_SEC = max(15, min(45, int(os.getenv("V11194_SOURCE_TIMEOUT_SEC", "30"))))
 FRAME_STAGE_MAX_SEC = max(45, min(120, int(os.getenv("V11194_FRAME_STAGE_MAX_SEC", "90"))))
 FRAME_REQUEST_TIMEOUT_SEC = max(8, min(30, int(os.getenv("V11194_FRAME_REQUEST_TIMEOUT_SEC", "22"))))
 MIN_FRAME_COVERAGE = max(.80, min(1.0, float(os.getenv("V11194_MIN_FRAME_COVERAGE", ".95"))))
 DEEP_CONCURRENCY = max(2, min(5, int(os.getenv("V11198_DEEP_CONCURRENCY", "4"))))
-FRAME_CONCURRENCY = max(1, int(os.getenv("V11190_FRAME_CONCURRENCY", "5")))
+FRAME_CONCURRENCY = max(1, min(5, int(os.getenv("V11190_FRAME_CONCURRENCY", "4"))))
+MULTIFRAME_TARGET = max(48, min(96, int(os.getenv("V11214_MULTIFRAME_TARGET", "72"))))
 MAX_RETURN_CANDIDATES = max(8, min(24, int(os.getenv("V11191_MAX_RETURN_CANDIDATES", "20"))))
 DEEP_SHORTLIST = max(24, min(48, int(os.getenv("V11191_FUTURES_DEEP_SHORTLIST", "36"))))
 MIN_OPPOSITE_SIDE_RESERVE = max(4, min(10, int(os.getenv("V11193_MIN_OPPOSITE_SIDE_RESERVE", "8"))))
@@ -91,13 +93,36 @@ def _diag(kind):
 
 
 def scan_status():
-    # Merge raw full-universe diagnostics with the later V11.18 Production
-    # diagnostics written into app.scanner._last_scan by _prepare/_health_gate.
+    """Return V11.21 discovery truth plus isolated Production diagnostics.
+
+    Legacy V11.18 writes into app.scanner._last_scan during _prepare/_health_gate.
+    Those fields must not overwrite the new source/frame/deep funnel, otherwise a
+    previous Production reason/status can masquerade as the current scan state.
+    """
     merged=copy.deepcopy(_last)
     compat=copy.deepcopy(getattr(legacy,"_last_scan",{}) or {})
+    production_keys=(
+        "production_pool","pre_v1142_final","v1142_filtered",
+        "alpha_rejected","execution_rejected","evidence_rejected",
+        "indicator_rejected","adaptive_rejected","strong_rejected",
+        "protection_rejected","portfolio_rejected","v1142_duration_sec",
+        "news_degraded","news_reason","health","clock_offset_ms","clock_rtt_ms",
+    )
     for kind in ("main","short"):
-        if kind in compat:
-            merged.setdefault(kind,{}).update(compat[kind])
+        raw=dict(compat.get(kind) or {})
+        dst=merged.setdefault(kind,{})
+        prod={key:copy.deepcopy(raw[key]) for key in production_keys if key in raw}
+        if prod:
+            dst["production"]=prod
+            for key,value in prod.items():
+                # Preserve compatibility for UI fields that are genuinely owned
+                # by Production, without allowing status/reason/funnel overwrite.
+                dst[key]=value
+        # Production final is meaningful only after this same full-universe run
+        # actually produced a pool. It may refine final, but never resurrect a
+        # stale final from a prior cycle.
+        if "production_pool" in raw and int(dst.get("deep_complete",0) or 0)>0:
+            dst["final"]=int(raw.get("final",dst.get("final",0)) or 0)
     return merged
 
 
@@ -264,6 +289,86 @@ def _decorate(signal, soft_long, soft_short, deep_order, total):
     return signal
 
 
+def _primary_side_score(frame, side, ticker_change=0.0, btc_change=0.0):
+    """Cheap one-timeframe whole-market rank before full 3-TF enrichment."""
+    try:
+        x=enrich(frame)
+        if len(x)<80:
+            return 0.0
+        a,p=x.iloc[-1],x.iloc[-2]
+    except Exception:
+        return 0.0
+    long=str(side).upper()=="LONG"
+    score=0.0
+    if long:
+        if a.ema20>a.ema50: score+=18
+        if a.ema50>a.ema200: score+=14
+        if a.close>a.ema20: score+=7
+        if a.plus_di>a.minus_di: score+=8
+        if a.macd_hist>p.macd_hist: score+=7
+        if a.close>a.vwap20: score+=6
+        if a.obv>a.obv_ema20: score+=5
+        if a.taker_imbalance10>=0: score+=5
+        if 40<=a.rsi<=74: score+=4
+        if ticker_change>btc_change+.75: score+=8
+    else:
+        if a.ema20<a.ema50: score+=18
+        if a.ema50<a.ema200: score+=14
+        if a.close<a.ema20: score+=7
+        if a.minus_di>a.plus_di: score+=8
+        if a.macd_hist<p.macd_hist: score+=7
+        if a.close<a.vwap20: score+=6
+        if a.obv<a.obv_ema20: score+=5
+        if a.taker_imbalance10<=0: score+=5
+        if 26<=a.rsi<=60: score+=4
+        if ticker_change<btc_change-.75: score+=8
+    adx=_f(getattr(a,"adx",0))
+    score+=min(10.0,max(0.0,adx-14.0)*.6)
+    eff=_f(getattr(a,"efficiency20",0))
+    if eff>=.35: score+=6
+    elif eff<.15: score-=6
+    volz=_f(getattr(a,"vol_z",0))
+    if volz>=.5: score+=min(5.0,volz*1.5)
+    return max(0.0,min(100.0,score))
+
+
+async def _primary_frame(symbol,kind,sem):
+    """One request per liquid symbol. This is the true whole-market pass."""
+    try:
+        interval="1h" if kind=="main" else "15m"
+        limit=280 if kind=="main" else 300
+        async with sem:
+            frame=await asyncio.wait_for(
+                get_klines(symbol,interval,limit),
+                timeout=FRAME_REQUEST_TIMEOUT_SEC,
+            )
+        return symbol,frame,None
+    except Exception as exc:
+        return symbol,None,exc
+
+
+async def _extra_frames(symbol,kind,sem):
+    """Only ranked finalists receive the other two timeframes."""
+    try:
+        async with sem:
+            if kind=="main":
+                request=asyncio.gather(
+                    get_klines(symbol,"15m",280),
+                    get_klines(symbol,"4h",360),
+                )
+            else:
+                request=asyncio.gather(
+                    get_klines(symbol,"5m",300),
+                    get_klines(symbol,"1h",360),
+                )
+            lower,higher=await asyncio.wait_for(
+                request,timeout=FRAME_REQUEST_TIMEOUT_SEC
+            )
+        return symbol,lower,higher,None
+    except Exception as exc:
+        return symbol,None,None,exc
+
+
 async def _frames(symbol, kind, sem):
     try:
         async with sem:
@@ -335,7 +440,7 @@ def _momentum_fallback(symbol,timeframe,base,higher,lower,side,d,market_context,
         soft+=3.0 if (taker>=1.03 if long else taker<=.97) else 0.0
         raw=max(float(min_score),soft)
         reasons=[
-            "V11.21.3 momentum-continuation lane",
+            "V11.21.5 momentum-continuation lane",
             f"HTF trend aligned · ADX {adx:.0f} · efficiency {eff:.2f}",
             f"distance EMA20 {dist:+.2f} ATR",
             f"taker {taker:.2f} · OI {oi_change:+.1f}% · spread {spread:.1f}bps",
@@ -579,54 +684,141 @@ async def _run(kind):
         d["liquid"]=len(liquid)
         _last[kind]=copy.deepcopy(d)
 
-        # Stage 1: full-universe multi-timeframe discovery, bounded.
+        # Stage 1A: one primary timeframe for EVERY actionable/liquid symbol.
+        # The previous implementation fetched three timeframes for every
+        # observed >=$1m symbol. With 491 observed names that meant 1473 kline
+        # requests before ranking, impossible inside a 90s stage at 4.5 req/s.
+        #
+        # Whole-market coverage now means every actionable liquid symbol gets a
+        # genuine candle analysis + all observed names remain represented by
+        # ticker/liquidity telemetry. Only the strongest balanced subset spends
+        # REST budget on the other two timeframes.
         sem=asyncio.Semaphore(FRAME_CONCURRENCY)
-        frame_tasks=[asyncio.create_task(_frames(symbol,kind,sem)) for symbol in observed]
-        frame_budget=min(FRAME_STAGE_MAX_SEC, max(1.0, remaining(reserve=45.0)))
-        done,pending=await asyncio.wait(frame_tasks,timeout=frame_budget)
+        primary_tasks=[
+            asyncio.create_task(_primary_frame(symbol,kind,sem))
+            for symbol in liquid
+        ]
+        primary_budget=min(65.0,max(1.0,remaining(reserve=70.0)))
+        done,pending=await asyncio.wait(primary_tasks,timeout=primary_budget)
         for task in pending:
             task.cancel()
         if pending:
             await asyncio.gather(*pending,return_exceptions=True)
-        d["frame_pending_cancelled"]=len(pending)
-
-        frame_rows=[]
-        for task in done:
-            try:
-                frame_rows.append(task.result())
-            except Exception as exc:
-                d["frames_failed"]+=1
-                if len(d["error_examples"])<5:
-                    d["error_examples"].append(
-                        f"frame task: {type(exc).__name__}: {exc}"
-                    )
 
         btc_change=_f(tickers.get("BTCUSDT",{}).get("change"))
-        ranked=[]
-        processed=0
-        for symbol,lower,base,higher,err in frame_rows:
-            processed+=1
-            if err is not None or base is None:
+        primary_rows=[]
+        for task in done:
+            try:
+                symbol,frame,err=task.result()
+            except Exception as exc:
+                d["frames_failed"]+=1
+                continue
+            if err is not None or frame is None:
                 d["frames_failed"]+=1
                 if len(d["error_examples"])<5:
-                    d["error_examples"].append(f"{symbol}: frame {err}")
-            else:
-                d["frames_ok"]+=1
-                change=_f(tickers.get(symbol,{}).get("change"))
-                sl=_soft_side_score(base,higher,lower,"LONG",change,btc_change)
-                ss=_soft_side_score(base,higher,lower,"SHORT",change,btc_change)
-                ranked.append((symbol,lower,base,higher,sl,ss))
-            if processed % 20 == 0:
-                _last[kind]=copy.deepcopy(d)
+                    d["error_examples"].append(f"{symbol}: primary frame {err}")
+                continue
+            change=_f(tickers.get(symbol,{}).get("change"))
+            sl=_primary_side_score(frame,"LONG",change,btc_change)
+            ss=_primary_side_score(frame,"SHORT",change,btc_change)
+            primary_rows.append((symbol,frame,sl,ss))
 
-        coverage=d["frames_ok"]/max(1,len(observed))
-        d["frame_coverage"]=round(coverage,4)
+        d["primary_frames_ok"]=len(primary_rows)
+        d["primary_frames_target"]=len(liquid)
+        d["primary_pending_cancelled"]=len(pending)
+        primary_coverage=len(primary_rows)/max(1,len(liquid))
+        d["primary_frame_coverage"]=round(primary_coverage,4)
         _last[kind]=copy.deepcopy(d)
-        if coverage < MIN_FRAME_COVERAGE:
+
+        # A full-market scan must see nearly all ACTIONABLE names. We do not
+        # require 95% coverage of hundreds of non-actionable $1m names.
+        if primary_coverage < .90:
             raise RuntimeError(
-                f"full-universe frame coverage incomplete: "
-                f"{d['frames_ok']}/{len(observed)} ({coverage:.0%})"
+                f"actionable primary-frame coverage incomplete: "
+                f"{len(primary_rows)}/{len(liquid)} ({primary_coverage:.0%})"
             )
+
+        # Balanced 72-name multiframe shortlist. It is adaptive in directional
+        # markets but preserves meaningful opposite-side discovery.
+        ordered=sorted(
+            primary_rows,
+            key=lambda row:max(float(row[2]),float(row[3])),
+            reverse=True,
+        )
+        target=min(MULTIFRAME_TARGET,len(ordered))
+        reserve=min(18,target//3)
+        selected=ordered[:target]
+
+        def _pside(row):
+            return "LONG" if float(row[2])>=float(row[3]) else "SHORT"
+
+        for wanted in ("LONG","SHORT"):
+            have=sum(_pside(r)==wanted for r in selected)
+            need=max(0,reserve-have)
+            candidates=[r for r in ordered[target:] if _pside(r)==wanted]
+            while need and candidates:
+                replaceable=[
+                    (i,r) for i,r in enumerate(selected)
+                    if _pside(r)!=wanted and sum(_pside(x)==_pside(r) for x in selected)>reserve
+                ]
+                if not replaceable:
+                    break
+                i,_=min(replaceable,key=lambda pair:max(pair[1][2],pair[1][3]))
+                selected[i]=candidates.pop(0)
+                need-=1
+
+        primary_map={row[0]:row[1] for row in selected}
+        extra_tasks=[
+            asyncio.create_task(_extra_frames(row[0],kind,sem))
+            for row in selected
+        ]
+        extra_budget=min(55.0,max(1.0,remaining(reserve=45.0)))
+        done2,pending2=await asyncio.wait(extra_tasks,timeout=extra_budget)
+        for task in pending2:
+            task.cancel()
+        if pending2:
+            await asyncio.gather(*pending2,return_exceptions=True)
+
+        frame_rows=[]
+        for task in done2:
+            try:
+                symbol,lower,higher,err=task.result()
+            except Exception as exc:
+                d["frames_failed"]+=1
+                continue
+            base=primary_map.get(symbol)
+            if err is not None or base is None or lower is None or higher is None:
+                d["frames_failed"]+=1
+                if len(d["error_examples"])<5:
+                    d["error_examples"].append(f"{symbol}: extra frames {err}")
+            else:
+                frame_rows.append((symbol,lower,base,higher,None))
+
+        d["multiframe_target"]=len(selected)
+        d["multiframe_ok"]=len(frame_rows)
+        d["multiframe_pending_cancelled"]=len(pending2)
+        multi_coverage=len(frame_rows)/max(1,len(selected))
+        d["multiframe_coverage"]=round(multi_coverage,4)
+        d["frames_ok"]=len(frame_rows)
+        d["frame_pending_cancelled"]=len(pending)+len(pending2)
+        _last[kind]=copy.deepcopy(d)
+
+        if multi_coverage < .85:
+            raise RuntimeError(
+                f"ranked multiframe coverage incomplete: "
+                f"{len(frame_rows)}/{len(selected)} ({multi_coverage:.0%})"
+            )
+
+        ranked=[]
+        for symbol,lower,base,higher,err in frame_rows:
+            change=_f(tickers.get(symbol,{}).get("change"))
+            sl=_soft_side_score(base,higher,lower,"LONG",change,btc_change)
+            ss=_soft_side_score(base,higher,lower,"SHORT",change,btc_change)
+            ranked.append((symbol,lower,base,higher,sl,ss))
+
+        # The meaningful coverage metric is now the liquid-universe primary pass.
+        d["frame_coverage"]=round(primary_coverage,4)
+        _last[kind]=copy.deepcopy(d)
 
         ranked.sort(key=lambda row:max(row[4],row[5]),reverse=True)
         d["top_long_watch"]=[
@@ -654,7 +846,7 @@ async def _run(kind):
             near.values(),key=lambda item:float(item["raw"]),reverse=True
         )[:12]
 
-        liquid_ranked=[row for row in ranked if row[0] in liquid_set]
+        liquid_ranked=list(ranked)
         # Keep these diagnostics for release compatibility and Fast Radar.
         long_ranked=sorted(liquid_ranked,key=lambda row:row[4],reverse=True)
         short_ranked=sorted(liquid_ranked,key=lambda row:row[5],reverse=True)
@@ -663,7 +855,8 @@ async def _run(kind):
         )
         d["deep_checked"]=len(deep_rows)
         d["deep_shortlist_target"]=DEEP_SHORTLIST
-        d["full_universe_ranked"]=len(liquid_ranked)
+        d["full_universe_ranked"]=len(primary_rows)
+        d["multiframe_ranked"]=len(liquid_ranked)
         d["deep_long"]=sum(float(row[4])>=float(row[5]) for row in deep_rows)
         d["deep_short"]=sum(float(row[4])<float(row[5]) for row in deep_rows)
         d["ticker_screened_all"]=len(symbols)

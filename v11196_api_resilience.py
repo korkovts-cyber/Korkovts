@@ -1,4 +1,4 @@
-"""V11.21.3 · Binance API resilience overlay.
+"""V11.21.5 · Binance API resilience overlay.
 
 Prevents full-universe research traffic from starving production health probes,
 adds proactive request-weight headroom, and makes health diagnostics distinguish
@@ -16,7 +16,8 @@ import v1141_governor as governor
 import v112_health as health
 
 ANALYSIS_CONCURRENCY=max(3,min(5,int(os.getenv("V11200_ANALYSIS_CONCURRENCY","4"))))
-SOFT_WEIGHT_CEILING=max(900,min(1400,int(os.getenv("V11200_SOFT_WEIGHT_CEILING","1150"))))
+# Railway env can make the ceiling stricter, never looser than audited 1150.
+SOFT_WEIGHT_CEILING=max(900,min(1150,int(os.getenv("V11200_SOFT_WEIGHT_CEILING","1150"))))
 RECENT_HEALTH_GRACE_SEC=max(30,min(180,int(os.getenv("V11196_HEALTH_GRACE_SEC","90"))))
 _analysis_sem=asyncio.Semaphore(ANALYSIS_CONCURRENCY)
 _original_governed_get=governor.governed_get
@@ -180,7 +181,7 @@ def text(h):
     skew="N/A" if h.server_clock_skew_ms<0 else f"{h.server_clock_skew_ms/1000:+.1f} sec"
     checked=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     return (
-        "📡 <b>PRODUCTION HEALTH · V11.21.3</b>\n━━━━━━━━━━━━━━━━━━\n"
+        "📡 <b>PRODUCTION HEALTH · V11.21.5</b>\n━━━━━━━━━━━━━━━━━━\n"
         f"Проверено: <b>{checked}</b>\n"
         f"{icon} Статус: <b>{h.status}</b>\n"
         f"REST latency: <b>{lat}</b>\n"

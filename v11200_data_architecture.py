@@ -1,10 +1,11 @@
-"""V11.21.3 · shared Binance data architecture · stability audited."""
+"""V11.21.5 · shared Binance data architecture · stability audited."""
 from __future__ import annotations
 import asyncio, copy, os, time
 import v1141_governor as governor
 import v11196_api_resilience as api_resilience
 
-REQUESTS_PER_SEC=max(3.5,min(6.0,float(os.getenv("V11200_RESEARCH_RPS","4.5"))))
+# Stale Railway variables may slow research, but may not raise it above the audited 4.5 req/s.
+REQUESTS_PER_SEC=max(3.5,min(4.5,float(os.getenv("V11200_RESEARCH_RPS","4.5"))))
 MIN_START_GAP=1.0/REQUESTS_PER_SEC
 SPOT_DERIVATIVE_SNAPSHOT_TTL=max(60,min(240,int(os.getenv("V11200_SPOT_DERIV_TTL_SEC","150"))))
 _previous_governed_get=governor.governed_get
@@ -151,7 +152,7 @@ def _install_spot_snapshot_reuse():
     return True
 
 def install():
-    api_resilience.SOFT_WEIGHT_CEILING=min(int(getattr(api_resilience,"SOFT_WEIGHT_CEILING",1500) or 1500),1500)
+    api_resilience.SOFT_WEIGHT_CEILING=min(int(getattr(api_resilience,"SOFT_WEIGHT_CEILING",1150) or 1150),1150)
     governor.governed_get=governed_get
     return True
 
