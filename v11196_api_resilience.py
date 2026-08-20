@@ -1,4 +1,4 @@
-"""V11.21.1 · Binance API resilience overlay.
+"""V11.21.3 · Binance API resilience overlay.
 
 Prevents full-universe research traffic from starving production health probes,
 adds proactive request-weight headroom, and makes health diagnostics distinguish
@@ -171,18 +171,23 @@ async def check(force=False):
 def text(h):
     icon={"OK":"✅","DEGRADED":"⚠️","PAUSE":"🛑"}.get(h.status,"⚪")
     reasons=", ".join(h.reasons) if h.reasons else "критических проблем нет"
+    gs=governor.status()
+    used_weight=int(gs.get("last_used_weight_1m",0) or 0)
+    cooldown=max(0.0,float(gs.get("cooldown_seconds",0) or 0))
     storage="PERSISTENT /data" if h.db_persistent else "LOCAL / MAY RESET"
     lat="N/A" if h.rest_latency_ms<0 else f"{h.rest_latency_ms:.0f} ms"
     candle="N/A" if h.candle_age_sec<0 else f"{h.candle_age_sec:.0f} sec"
     skew="N/A" if h.server_clock_skew_ms<0 else f"{h.server_clock_skew_ms/1000:+.1f} sec"
     checked=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     return (
-        "📡 <b>PRODUCTION HEALTH · V11.21.1</b>\n━━━━━━━━━━━━━━━━━━\n"
+        "📡 <b>PRODUCTION HEALTH · V11.21.3</b>\n━━━━━━━━━━━━━━━━━━\n"
         f"Проверено: <b>{checked}</b>\n"
         f"{icon} Статус: <b>{h.status}</b>\n"
         f"REST latency: <b>{lat}</b>\n"
         f"BTC 1m freshness: <b>{candle}</b>\n"
         f"Clock skew: <b>{skew}</b>\n"
+        f"Binance weight 1m: <b>{used_weight}</b> · soft ceiling <b>{SOFT_WEIGHT_CEILING}</b>\n"
+        f"Cooldown: <b>{cooldown:.0f}s</b>\n"
         f"WebSocket: <b>{'ONLINE' if h.ws_connected and h.ws_age_sec<=45 else 'DEGRADED'}</b>\n"
         f"Database: <b>{'OK' if h.db_ok else 'ERROR'}</b> · <b>{storage}</b>\n"
         f"Path: <code>{h.db_path}</code>\n"

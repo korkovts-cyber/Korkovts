@@ -2,7 +2,7 @@ import ast
 import unittest
 from pathlib import Path
 
-class V112110Contracts(unittest.TestCase):
+class V112130Contracts(unittest.TestCase):
     def test_futures_full_universe_before_deep(self):
         s=Path("v11191_futures_engine.py").read_text()
         self.assertIn("full_universe_ranked",s)
@@ -375,12 +375,12 @@ class V112110Contracts(unittest.TestCase):
 
     def test_v112003_health_failure_is_visible(self):
         s=Path("bot_v11191.py").read_text()
-        self.assertIn("HEALTH CHECK FAILED · V11.21.1",s)
+        self.assertIn("HEALTH CHECK FAILED · V11.21.3",s)
         self.assertIn("Старый PAUSE не считается новым результатом",s)
 
     def test_v112003_health_card_has_version_and_timestamp(self):
         s=Path("v11196_api_resilience.py").read_text()
-        self.assertIn("PRODUCTION HEALTH · V11.21.1",s)
+        self.assertIn("PRODUCTION HEALTH · V11.21.3",s)
         self.assertIn("Проверено:",s)
         self.assertIn("datetime.now(timezone.utc)",s)
 
@@ -446,7 +446,7 @@ class V112110Contracts(unittest.TestCase):
 
     def test_v112006_data_architecture_version_is_current(self):
         s=Path("v11200_data_architecture.py").read_text()
-        self.assertIn("V11.21.1",s)
+        self.assertIn("V11.21.3",s)
         self.assertNotIn("V11.20.2",s)
 
     def test_v112007_reads_weight_header_even_on_429(self):
@@ -494,13 +494,13 @@ class V112110Contracts(unittest.TestCase):
 
     def test_v112110_new_decision_engine_has_fresh_futures_cohort(self):
         s=Path("v11210_signal_engine.py").read_text()
-        self.assertIn('FUTURES_COHORT="11.21.1-signal-engine"',s)
+        self.assertIn('FUTURES_COHORT="11.21.3-signal-engine"',s)
         self.assertIn("entry_base.FUTURES_RELEASE_KEY=FUTURES_COHORT",s)
         self.assertIn("base.db.STRATEGY_VERSION=FUTURES_COHORT",s)
 
     def test_v112110_spot_watch_and_signal_cohorts_are_synchronized(self):
         s=Path("v11210_signal_engine.py").read_text()
-        self.assertIn('SPOT_COHORT="11.21.1-spot-signal-engine"',s)
+        self.assertIn('SPOT_COHORT="11.21.3-spot-signal-engine"',s)
         self.assertIn("spot_db.SPOT_RELEASE_VERSION=SPOT_COHORT",s)
         self.assertIn("spot_watch.SPOT_RELEASE_KEY=SPOT_COHORT",s)
 
@@ -515,6 +515,61 @@ class V112110Contracts(unittest.TestCase):
         s=Path("v11210_signal_engine.py").read_text()
         self.assertIn("COALESCE(s.release_version,'')=?",s)
         self.assertIn("base.spot_was_sent_recently=spot_was_sent_recently_current",s)
+
+    def test_v11212_meta_old_model_is_shadow_only(self):
+        s=Path("v11210_signal_engine.py").read_text()
+        self.assertIn("meta_decide_shadow",s)
+        self.assertIn("meta_shadow_only",s)
+        self.assertIn("ready=False,eligible=True",s)
+
+    def test_v11212_adaptive_old_model_is_shadow_only(self):
+        s=Path("v11210_signal_engine.py").read_text()
+        self.assertIn("adaptive_gate_shadow",s)
+        self.assertIn("adaptive_shadow_only",s)
+        self.assertIn("return True,assessment",s)
+
+    def test_v11212_old_entry_history_cannot_reject(self):
+        s=Path("v11210_signal_engine.py").read_text()
+        self.assertIn("entry_negative_penalty_shadow",s)
+        self.assertIn("return 0.0,stats",s)
+
+    def test_v11212_old_calibration_is_shadow_only(self):
+        s=Path("v11191_futures_engine.py").read_text()
+        self.assertIn("historical_calibration_penalty",s)
+        self.assertIn("calibration_shadow_only",s)
+        self.assertIn("penalty = 0.0",s)
+
+    def test_v11213_spot_watchtower_shares_research_gate(self):
+        s=Path("bot_v11191.py").read_text()
+        block=s[s.index("_original_spot_watch_job_v11213"):s.index("# Serialize scheduled Fast Radar")]
+        self.assertIn("_v11205_research_gate.acquire()",block)
+        self.assertIn("base.health_check(force=True)",block)
+        self.assertIn("base.core._scan_lock.locked()",block)
+        self.assertIn("base.spot_watch_job=_spot_watch_job_v11213",block)
+
+    def test_v11213_entry_now_is_not_put_behind_research_gate(self):
+        s=Path("bot_v11191.py").read_text()
+        block=s[s.index("_original_spot_watch_job_v11213"):s.index("# Serialize scheduled Fast Radar")]
+        self.assertNotIn("entry_monitor_job",block)
+        self.assertNotIn("assess_entry_row",block)
+
+    def test_v11213_funnel_preserves_fast_and_full_deep_counts(self):
+        s=Path("v11191_futures_engine.py").read_text()
+        self.assertIn('d["prefiltered"]=len(deep_rows)',s)
+        self.assertIn('d["deep_checked"]=len(full_rows)',s)
+        self.assertIn('"top_rejections"',s)
+
+    def test_v11213_heartbeat_exposes_top_blockers(self):
+        s=Path("bot_v11191.py").read_text()
+        self.assertIn("🧬 Deep funnel",s)
+        self.assertIn("🧱 Главные блокеры",s)
+        self.assertIn("🔬 Ближайший",s)
+
+    def test_v11213_health_exposes_request_weight(self):
+        s=Path("v11196_api_resilience.py").read_text()
+        self.assertIn("Binance weight 1m",s)
+        self.assertIn("SOFT_WEIGHT_CEILING",s)
+        self.assertIn("cooldown_seconds",s)
 
 if __name__=="__main__":
     unittest.main()

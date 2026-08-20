@@ -1,4 +1,4 @@
-"""Korkovts V11.21 · CODE-QUALITY AUDITED FULL-UNIVERSE FUTURES ENGINE.
+"""Korkovts V11.21.3 · CODE-QUALITY AUDITED FULL-UNIVERSE FUTURES ENGINE.
 
 Goal:
 - evaluate the whole liquid Binance USD-M perpetual universe before any hard technical gate;
@@ -110,9 +110,19 @@ def _finish(d, status, reason=""):
         d["elapsed_sec"] = max(0.0, time.time() - start)
     except Exception:
         pass
-    # Compatibility with old UI.
-    d["prefiltered"] = d.get("deep_checked", 0)
-    d["deep_rejected"] = max(0, d.get("deep_checked", 0) - d.get("final", 0))
+    # Compatibility with old UI, but do not collapse the two-stage deep funnel.
+    # prefiltered = cheap derivatives screen candidate count (normally 36);
+    # deep_checked = expensive production snapshot count (normally 14).
+    d["prefiltered"] = int(d.get("deep_screen_candidates", d.get("deep_checked", 0)) or 0)
+    d["deep_rejected"] = max(0, int(d.get("deep_checked",0) or 0) - int(d.get("final",0) or 0))
+    rejects=dict(d.get("rejections") or {})
+    d["top_rejections"]=[
+        {"reason":str(k),"count":int(v)}
+        for k,v in sorted(
+            ((k,v) for k,v in rejects.items() if str(k)!="PASS"),
+            key=lambda item:(-int(item[1]),str(item[0]))
+        )[:3]
+    ]
     d["technical_rejected"] = max(0, d.get("observed", 0) - d.get("frames_ok", 0))
     d["technical_errors"] = d.get("frames_failed", 0)
     _last[d["kind"]] = copy.deepcopy(d)
@@ -325,7 +335,7 @@ def _momentum_fallback(symbol,timeframe,base,higher,lower,side,d,market_context,
         soft+=3.0 if (taker>=1.03 if long else taker<=.97) else 0.0
         raw=max(float(min_score),soft)
         reasons=[
-            "V11.21 momentum-continuation lane",
+            "V11.21.3 momentum-continuation lane",
             f"HTF trend aligned · ADX {adx:.0f} · efficiency {eff:.2f}",
             f"distance EMA20 {dist:+.2f} ATR",
             f"taker {taker:.2f} · OI {oi_change:+.1f}% · spread {spread:.1f}bps",
@@ -407,7 +417,12 @@ async def _deep_one(row, kind, market_context, news, adl_risks, min_score, sem):
             d["_v11210_fallback"]=True
 
         side = str(getattr(result,"side","") or "").upper()
-        penalty = max(0.0,float(calibration_penalty(symbol,side,timeframe) or 0))
+        historical_penalty = max(0.0,float(calibration_penalty(symbol,side,timeframe) or 0))
+        result.feature_snapshot.setdefault("v11212_cohort_isolation",{}).update({
+            "historical_calibration_penalty":historical_penalty,
+            "calibration_shadow_only":True,
+        })
+        penalty = 0.0
         if penalty>0:
             threshold=min(95.0,float(min_score)+penalty)
             if fallback_used:
@@ -676,6 +691,7 @@ async def _run(kind):
         # 36-name fast screen is reported separately to avoid claiming all 36
         # received the 9-component production snapshot.
         d["deep_screen_candidates"]=len(deep_rows)
+        d["prefiltered"]=len(deep_rows)
         d["deep_checked"]=len(full_rows)
         d["deep_full_target"]=len(full_rows)
         d["deep_full_symbols"]=[row[0] for row in full_rows]
