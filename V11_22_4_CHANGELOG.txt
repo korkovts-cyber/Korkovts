@@ -1,0 +1,7 @@
+V11.22.4 FULL-DEEP REPAIR
+- Fixes live 2/14 full-deep deadline failure.
+- Restores analysis concurrency 2 -> 4.
+- Full-deep concurrency 6.
+- Full scan budget 420s so minute-boundary weight waits do not invalidate a scan.
+- Per-candidate deep timeout 30s with explicit DEEP_CANDIDATE_TIMEOUT diagnostics.
+- Keeps proactive Binance weight governor and all trading/risk gates.

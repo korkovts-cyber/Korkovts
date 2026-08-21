@@ -21,5 +21,5 @@ class V11222Contracts(unittest.TestCase):
  def test_railway(self):
   self.assertIn("python preflight_v11222.py",self.r)
   self.assertIn("test_v11222_contract.py",self.r)
-  self.assertIn("python bot_v11222.py",self.r)
+  self.assertTrue(any(x in self.r for x in ("python bot_v11222.py","python bot_v11223.py","python bot_v11224.py")))
 if __name__=="__main__": unittest.main()

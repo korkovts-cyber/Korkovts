@@ -32,7 +32,7 @@ contracts = [
     ("Spot watch 1m", "base.SPOT_WATCH_INTERVAL_MIN = 1" in overlay),
     ("Spot watch waits for research slot", "timeout=45.0" in overlay),
     ("Spot bootstrap", "v11217-spot-auto-bootstrap" in overlay),
-    ("Layered entrypoint", any(x in railway for x in ("python bot_v11217.py","python bot_v11218.py","python bot_v11219.py","python bot_v11220.py","python bot_v11221.py","python bot_v11222.py"))),
+    ("Layered entrypoint", any(x in railway for x in ("python bot_v11217.py","python bot_v11218.py","python bot_v11219.py","python bot_v11220.py","python bot_v11221.py","python bot_v11222.py","python bot_v11223.py","python bot_v11224.py"))),
 ]
 failed = [name for name, ok in contracts if not ok]
 if failed:

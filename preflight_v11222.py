@@ -19,7 +19,7 @@ checks=[
  ("startup fail closed","startup blocked: final Binance governor is not bound" in o),
  ("newline literal fix",'text.replace("\\\\n", "\\n")' in o),
  ("runtime bound/error diagnostic",'state = "BOUND" if _binding_ok() else "ERROR"' in o),
- ("final entrypoint","python bot_v11222.py" in r),
+ ("final entrypoint",("python bot_v11222.py" in r or ("python bot_v11223.py" in r or "python bot_v11224.py" in r))),
  ("final contract","test_v11222_contract.py" in r),
 ]
 bad=[n for n,ok in checks if not ok]

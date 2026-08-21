@@ -1,0 +1,5 @@
+V11.22.3 END-TO-END REPAIR
+Futures: fixes deterministic 155/210 coverage starvation caused by 2.4 req/s vs 65s primary window. Restores 4.0 req/s with proactive weight reservation intact; full budget 320s; 90% coverage requirement unchanged.
+Spot: full liquid-universe daily ranking retained; expensive deep stage bounded 36->24; separate proactive Spot API weight/pacing added.
+Manual Spot/Futures always return result or exact failure reason.
+No signal threshold or final risk gate weakened.

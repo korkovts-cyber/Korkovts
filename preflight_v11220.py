@@ -25,7 +25,7 @@ checks=[
     ("material geometry guard", "_materially_same_geometry" in o and "overlap_ratio" in o),
     ("watchtower reset remains", "reset_spot_ready" in o),
     ("no synthetic 2/2", "Never create or preserve 2/2" in o),
-    ("final layered entrypoint", ("python bot_v11220.py" in r) or (("python bot_v11221.py" in r or "python bot_v11222.py" in r))),
+    ("final layered entrypoint", ("python bot_v11220.py" in r) or (("python bot_v11221.py" in r or ("python bot_v11222.py" in r or ("python bot_v11223.py" in r or "python bot_v11224.py" in r))))),
     ("final contract", "test_v11220_contract.py" in r),
 ]
 bad=[name for name,ok in checks if not ok]

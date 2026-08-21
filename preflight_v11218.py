@@ -37,7 +37,7 @@ contracts = [
     ("Near-zone only permits recheck", "_near_original_zone" in overlay),
     ("Research gate retained", "_v11205_research_gate" in overlay),
     ("Heartbeat blocker diagnostics", "Spot top:" in overlay and "last_reason" in overlay),
-    ("V11.21.8+ layered entrypoint", any(x in railway for x in ("python bot_v11218.py","python bot_v11219.py","python bot_v11220.py","python bot_v11221.py","python bot_v11222.py"))),
+    ("V11.21.8+ layered entrypoint", any(x in railway for x in ("python bot_v11218.py","python bot_v11219.py","python bot_v11220.py","python bot_v11221.py","python bot_v11222.py","python bot_v11223.py","python bot_v11224.py"))),
     ("V11.21.8 contract test executed", "test_v11218_contract.py" in railway),
     ("V11.21.8 files explicitly compiled", "v11218_spot_entry_fix.py" in railway and "bot_v11218.py" in railway),
     ("Final health version sync", "health_text_v11218" in overlay),
