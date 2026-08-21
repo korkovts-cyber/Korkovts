@@ -1,0 +1,6 @@
+V11.22.2 VERIFICATION HARDENING
+
+- Fixed Telegram literal \n normalization.
+- API final binding status is now measured by Python object identity, not printed optimistically.
+- Startup fails closed if app.market._get is not the final V11.22.1 governed path.
+- No trading threshold or safety gate changed.

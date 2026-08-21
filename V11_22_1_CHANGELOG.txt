@@ -1,0 +1,8 @@
+V11.22.1 PRODUCTION REACHABILITY
+- Final Binance governor rebound into app.market._get.
+- Proactive weighted request reservation: 780/min with critical reserve.
+- Research pace 2.4 req/s, analysis concurrency 2.
+- FINAL_STRATEGY_REJECT exposes actual blocker counts.
+- Stale/unknown ADL no longer acts as directional veto by itself; HIGH ADL remains hard. Recovered candidates are ADL UNKNOWN, leverage 1, and still pass later gates.
+- Spot old-zone precheck widened only to permit fresh exact revalidation.
+- Literal \n UI formatting fixed.
