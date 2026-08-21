@@ -14,5 +14,5 @@ class V11223Contracts(unittest.TestCase):
   order=["i217()","i218()","i219()","i220()","i221()","i222()","i223()"]
   for a,b in zip(order,order[1:]): self.assertLess(self.e.index(a),self.e.index(b))
  def test_railway(self):
-  self.assertIn("python preflight_v11223.py",self.r); self.assertIn("test_v11223_contract.py",self.r); self.assertTrue(any(x in self.r for x in ("python bot_v11223.py","python bot_v11224.py")))
+  self.assertIn("python preflight_v11223.py",self.r); self.assertIn("test_v11223_contract.py",self.r); self.assertTrue(any(x in self.r for x in ("python bot_v11223.py","python bot_v11224.py","python bot_v11225.py","python bot_v11226.py")))
 if __name__=="__main__": unittest.main()

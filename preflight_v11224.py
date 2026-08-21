@@ -18,7 +18,7 @@ checks=[
  ("420s scan budget","420" in o and "FULL_SCAN_BUDGET_SEC" in o),
  ("30s candidate timeout","timeout=30.0" in o),
  ("deep timeout reason","DEEP_CANDIDATE_TIMEOUT" in o),
- ("final entrypoint","python bot_v11224.py" in r),
+ ("final entrypoint",("python bot_v11224.py" in r or ("python bot_v11225.py" in r or "python bot_v11226.py" in r))),
  ("contract","test_v11224_contract.py" in r),
 ]
 bad=[n for n,ok in checks if not ok]

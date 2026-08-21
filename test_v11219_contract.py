@@ -10,5 +10,5 @@ class V11219Contracts(unittest.TestCase):
   for x in ("price invalidated before BUY","spot_active_correlation_risk","spot_recheck_watch","record_spot_ready","streak<2","_deliver_spot_pending"): self.assertIn(x,self.o)
  def test_api(self):
   for x in ("3.2","900","700"): self.assertIn(x,self.o)
- def test_railway(self): self.assertIn("python preflight_v11219.py",self.r); self.assertIn("test_v11219_contract.py",self.r); self.assertTrue(any(x in self.r for x in ("python bot_v11219.py","python bot_v11220.py","python bot_v11221.py","python bot_v11222.py","python bot_v11223.py","python bot_v11224.py")))
+ def test_railway(self): self.assertIn("python preflight_v11219.py",self.r); self.assertIn("test_v11219_contract.py",self.r); self.assertTrue(any(x in self.r for x in ("python bot_v11219.py","python bot_v11220.py","python bot_v11221.py","python bot_v11222.py","python bot_v11223.py","python bot_v11224.py","python bot_v11225.py","python bot_v11226.py")))
 if __name__=="__main__": unittest.main()

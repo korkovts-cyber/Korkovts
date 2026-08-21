@@ -37,7 +37,7 @@ class V11220Contracts(unittest.TestCase):
         self.assertIn("python preflight_v11220.py", self.r)
         self.assertIn("test_v11220_contract.py", self.r)
         self.assertIn("v11220_deep_audit.py", self.r)
-        self.assertTrue(any(x in self.r for x in ("python bot_v11220.py","python bot_v11221.py","python bot_v11222.py","python bot_v11223.py","python bot_v11224.py")))
+        self.assertTrue(any(x in self.r for x in ("python bot_v11220.py","python bot_v11221.py","python bot_v11222.py","python bot_v11223.py","python bot_v11224.py","python bot_v11226.py")))
 
 if __name__=="__main__":
     unittest.main()

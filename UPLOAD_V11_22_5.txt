@@ -1,0 +1,1 @@
+Upload all files to repository root. Final process: python bot_v11225.py

@@ -1,0 +1,15 @@
+V11.22.6 STABLE DEEP ENGINE
+
+LIVE BUGS FIXED
+- Deep timeout no longer counts semaphore queue waiting.
+- Per-candidate 65s execution budget begins only after slot acquisition.
+- Deep concurrency 3 reduces Binance endpoint bursts.
+- /futures/data/* endpoints paced separately at 1.6 req/s.
+- Derivatives snapshots cached 25s and duplicate in-flight requests are shared.
+- DEEP_CANDIDATE_TIMEOUT now correctly reduces verified coverage.
+- Current-cycle deep timeout/error counters reset before every scan.
+- Contradictory 'verified 14/14' vs 'complete 0/14' telemetry fixed.
+- Full Futures scan budget 540s.
+- V11.22.5 Spot/Futures pipeline independence retained.
+
+Trading thresholds and final risk gates are unchanged.

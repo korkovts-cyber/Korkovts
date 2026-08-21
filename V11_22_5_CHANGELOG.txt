@@ -1,0 +1,1 @@
+V11.22.5: Spot/Futures independent research, bounded Spot daily, ranking-only Futures fast-screen timeout fallback, adaptive full-deep 14..20. Final production gates unchanged.

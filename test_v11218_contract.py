@@ -37,7 +37,7 @@ class V11218Contracts(unittest.TestCase):
         self.assertIn("python preflight_v11218.py", self.railway)
         self.assertIn("test_v11218_contract.py", self.railway)
         self.assertIn("v11218_spot_entry_fix.py", self.railway)
-        self.assertTrue(any(x in self.railway for x in ("python bot_v11218.py","python bot_v11219.py","python bot_v11220.py","python bot_v11221.py","python bot_v11222.py","python bot_v11223.py","python bot_v11224.py")))
+        self.assertTrue(any(x in self.railway for x in ("python bot_v11218.py","python bot_v11219.py","python bot_v11220.py","python bot_v11221.py","python bot_v11222.py","python bot_v11223.py","python bot_v11224.py","python bot_v11226.py")))
 
     def test_entrypoint_layers_217_then_218(self):
         self.assertIn("install_v11217()", self.entry)

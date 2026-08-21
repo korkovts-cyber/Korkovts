@@ -1,0 +1,10 @@
+Upload ALL files from this ZIP into the repository root.
+Replace railway.toml and predecessor preflight/test files when prompted.
+Final Railway process: python bot_v11226.py
+
+Expected runtime:
+- Primary coverage near 100%
+- Multi-TF complete
+- Deep timeouts should be current-cycle only and sharply reduced
+- 'Full-deep verified' must no longer count DEEP_CANDIDATE_TIMEOUT as verified
+- Spot and Futures can scan independently
