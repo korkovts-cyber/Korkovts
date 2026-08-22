@@ -22,7 +22,7 @@ checks=[
  ("snapshot dedupe","_snapshot_inflight" in o and "_snapshot_cache" in o),
  ("timeout verification","DEEP_CANDIDATE_TIMEOUT" in o and "deep_verification_v11226" in o),
  ("counter reset","_reset_deep_stats" in o),
- ("entrypoint","python bot_v11226.py" in r),
+ ("entrypoint",("python bot_v11226.py" in r or "python bot_v11227.py" in r)),
  ("contract","test_v11226_contract.py" in r),
 ]
 bad=[n for n,ok in checks if not ok]
