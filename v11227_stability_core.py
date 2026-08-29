@@ -254,8 +254,22 @@ def health_v11227(h):
     return text
 base.health_text=health_v11227
 
-def install():
+def _rebind_scheduler_aliases_v11227():
     market._get=governed_get_v11227
+    try:
+        governor.governed_get=governed_get_v11227
+    except Exception:
+        pass
+    for module_name in ("v11_liquidity","v112_alpha","v112_health","v1141_integrity","v11197_sources"):
+        try:
+            m=__import__(module_name)
+            if hasattr(m,"_get"):
+                m._get=governed_get_v11227
+        except Exception:
+            pass
+
+def install():
+    _rebind_scheduler_aliases_v11227()
     futures._deep_one=deep_one_v11227
     base.core._run_automatic_scan=auto_runner_v11227
     base.APP_VERSION=VERSION
