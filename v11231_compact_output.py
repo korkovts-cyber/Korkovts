@@ -165,3 +165,52 @@ def install():
     base.config.APP_VERSION = VERSION
     base.core.APP_VERSION = VERSION
     return True
+
+
+# V11.23.4 compact override: show independent family rating and WAIT explicitly.
+_old_futures_card_v11231 = futures_card_compact
+
+def futures_card_v11234(s, priority=False):
+    snap = dict(getattr(s, "feature_snapshot", {}) or {})
+    fg = dict(snap.get("final_gate_v11234") or {})
+    fams = dict(fg.get("families") or {})
+    aligned = int(fg.get("aligned", 0) or 0)
+    side = str(getattr(s, "side", "") or "").upper()
+    icon = "🟢" if side == "LONG" else "🔴"
+    label = str(getattr(s, "strong_signal_label", "SIGNAL") or "SIGNAL")
+
+    if label == "WAIT_ENTRY":
+        action = "⏳ СИЛЬНЫЙ СЕТАП · ЖДЁМ ВХОД"
+    elif label == "PRIME_STRONG":
+        action = "🏆 PRIME · ВХОД МОЖНО РАССМАТРИВАТЬ"
+    elif label == "STRONG":
+        action = "✅ STRONG · ВХОД МОЖНО РАССМАТРИВАТЬ"
+    else:
+        action = "⚪ ПОКА НЕ ВХОДИМ"
+
+    ru = {
+        "TREND":"Тренд",
+        "MOMENTUM":"Импульс",
+        "FLOW":"Поток",
+        "LOCATION":"Точка входа",
+        "EXECUTION":"Исполнение",
+    }
+    checks = " · ".join(
+        f"{ru[k]} {'✅' if fams.get(k) else '❌'}"
+        for k in ("TREND","MOMENTUM","FLOW","LOCATION","EXECUTION")
+    ) if fams else ""
+
+    return (
+        f"{icon} <b>{escape(str(getattr(s,'symbol','?')))} · {side}</b>\n"
+        f"{action}\n\n"
+        f"Вход: <b>{_fmt(getattr(s,'entry_low',0))} — {_fmt(getattr(s,'entry_high',0))}</b>\n"
+        f"Стоп: <b>{_fmt(getattr(s,'stop',0))}</b>\n"
+        f"TP1: <b>{_fmt(getattr(s,'tp1',0))}</b> · TP2: <b>{_fmt(getattr(s,'tp2',0))}</b>\n"
+        f"Факторы: <b>{aligned}/5</b>\n\n"
+        f"{checks}"
+    )
+
+def install_v11234_output():
+    v11_ui.card = futures_card_v11234
+    base.card = futures_card_v11234
+    return True
