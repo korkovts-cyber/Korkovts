@@ -2,7 +2,7 @@
 builder = "RAILPACK"
 
 [deploy]
-startCommand = "python preflight_v11232.py && python -m py_compile bot_v11232.py v11232_integrated_freshness.py v11231_compact_output.py v11230_signal_core.py v11229_pipeline_repair.py v11228_modern_ui.py v11227_stability_core.py v11226_stable_deep_engine.py && python bot_v11232.py"
+startCommand = "python preflight_v11233.py && python -m py_compile bot_v11233.py v11233_geometry_repair.py v11232_integrated_freshness.py v11231_compact_output.py v11230_signal_core.py v11229_pipeline_repair.py v11228_modern_ui.py v11227_stability_core.py v11226_stable_deep_engine.py && python bot_v11233.py"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
 overlapSeconds = 0
