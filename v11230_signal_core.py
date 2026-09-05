@@ -175,11 +175,15 @@ def _family_fallback(symbol, timeframe, df, higher=None, min_score=75, lower=Non
     else:
         side, fams, aligned, fam_score, opposite = "SHORT", families_short, nS, sS, sL
 
-    # Mandatory independent concepts + 4/5 agreement.
-    if aligned < 4 or not fams["TREND"] or not fams["EXECUTION"]:
+    # V11.23.8 activation: allow a 3/5 candidate ONLY when the three core
+    # concepts are simultaneously present: TREND + LOCATION + EXECUTION.
+    # 4/5+ keeps the previous behavior. This increases candidate reachability
+    # without accepting trend-only/momentum-only guesses.
+    core_three = bool(fams["TREND"] and fams["LOCATION"] and fams["EXECUTION"])
+    if (aligned < 3) or (aligned == 3 and not core_three) or not fams["TREND"] or not fams["EXECUTION"]:
         if isinstance(audit, dict):
             audit.setdefault("issues", []).append(
-                f"family consensus {aligned}/5; trend={int(fams['TREND'])}; execution={int(fams['EXECUTION'])}"
+                f"family consensus {aligned}/5; trend={int(fams['TREND'])}; location={int(fams['LOCATION'])}; execution={int(fams['EXECUTION'])}"
             )
         return None
 
