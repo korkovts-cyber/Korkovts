@@ -27,7 +27,7 @@ from app.config import ROUND_TRIP_COST_PCT
 import v11191_futures_engine as futures
 
 base = runtime.base
-VERSION = "11.23.0"
+VERSION = "11.23.0+activation236"
 
 _original_analyze = futures.legacy.analyze
 
@@ -80,7 +80,7 @@ def _family_fallback(symbol, timeframe, df, higher=None, min_score=75, lower=Non
 
     if quality < 8 or not adl_fresh or adl_risk not in {"low", "medium"}:
         return None
-    if spread > 5.0 or abs(basis) > 20.0:
+    if spread > 7.0 or abs(basis) > 30.0:
         return None
 
     news_score = _f((news or {}).get("score"))
@@ -104,35 +104,35 @@ def _family_fallback(symbol, timeframe, df, higher=None, min_score=75, lower=Non
 
     # MOMENTUM: one composite vote. ADX controls quality; MACD/RSI express side.
     momentum_long = (
-        _f(a.adx) >= 18
-        and _f(a.macd_hist) > _f(p.macd_hist)
-        and 45 <= _f(a.rsi) <= 72
+        _f(a.adx) >= 16
+        and _f(a.macd_hist) >= _f(p.macd_hist)
+        and 42 <= _f(a.rsi) <= 75
     )
     momentum_short = (
-        _f(a.adx) >= 18
-        and _f(a.macd_hist) < _f(p.macd_hist)
-        and 28 <= _f(a.rsi) <= 55
+        _f(a.adx) >= 16
+        and _f(a.macd_hist) <= _f(p.macd_hist)
+        and 25 <= _f(a.rsi) <= 58
     )
 
     # FLOW: derivatives are the independent live confirmation.
     # Mild OI contraction is tolerated; directional taker flow is required.
-    flow_long = taker >= 1.02 and oi_change >= -0.25 and top_change >= -6.0
-    flow_short = taker <= 0.98 and oi_change >= -0.25 and top_change <= 6.0
+    flow_long = taker >= 1.01 and oi_change >= -0.50 and top_change >= -8.0
+    flow_short = taker <= 0.99 and oi_change >= -0.50 and top_change <= 8.0
 
     # LOCATION: avoid chasing. Use ATR distance + VWAP/lower-TF timing once.
     dist = (price - _f(a.ema20)) / atr
     lower_long = z is None or (_f(z.close) >= _f(z.ema20) or _f(z.macd_hist) >= 0)
     lower_short = z is None or (_f(z.close) <= _f(z.ema20) or _f(z.macd_hist) <= 0)
-    location_long = -0.10 <= dist <= 1.55 and price >= _f(a.vwap20) and lower_long
-    location_short = -1.55 <= dist <= 0.10 and price <= _f(a.vwap20) and lower_short
+    location_long = -0.25 <= dist <= 1.85 and price >= (_f(a.vwap20) - atr * 0.20) and lower_long
+    location_short = -1.85 <= dist <= 0.25 and price <= (_f(a.vwap20) + atr * 0.20) and lower_short
 
     # EXECUTION/RISK: one hard family. Avoid crowded/funding extremes.
     execution_long = (
-        spread <= 5.0 and funding <= 0.0012 and crowd < 1.85
+        spread <= 7.0 and funding <= 0.0015 and crowd < 2.00
         and news_score > -0.80
     )
     execution_short = (
-        spread <= 5.0 and funding >= -0.0012 and crowd > 0.55
+        spread <= 7.0 and funding >= -0.0015 and crowd > 0.50
         and news_score < 0.80
     )
 
@@ -183,17 +183,16 @@ def _family_fallback(symbol, timeframe, df, higher=None, min_score=75, lower=Non
             )
         return None
 
-    if fam_score - opposite < 10.0:
+    if fam_score - opposite < 6.0:
         if isinstance(audit, dict):
             audit.setdefault("issues", []).append(
-                f"family direction gap {fam_score-opposite:.1f} < 10"
+                f"family direction gap {fam_score-opposite:.1f} < 6"
             )
         return None
 
-    # Respect regime only as a veto when it is directional and the candidate
-    # has only 4/5 families. Exceptional 5/5 independent setups may diverge.
-    if market_bias in {"LONG", "SHORT"} and side != market_bias and aligned < 5:
-        return None
+    # Market regime is already reflected as a ranking penalty above. Do not
+    # hard-kill a 4/5 coin-specific setup solely because BTC points the other way.
+    # Execution, location, trend and derivatives still remain mandatory.
 
     # Geometry: controlled ATR risk, no ultra-tight artificial stops.
     if side == "LONG":
